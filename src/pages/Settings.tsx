@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { api, APP_VERSION, hostOf, logLine, platform, type UpdateInfo } from "../api";
+import { api, APP_VERSION, hostOf, logLine, platform } from "../api";
+import type { UpdateInfo } from "../types";
 import { APP_NAME } from "../branding";
 import { useStore } from "../store";
 import { Modal, Toggle } from "../components/ui";

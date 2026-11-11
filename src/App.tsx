@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useStore, type Page, type Tab } from "./store";
 import { isMobile, selfTest } from "./api";
-import { addPluginListener, invoke } from "@tauri-apps/api/core";
+import { exitApp, logLine, setTextInteraction } from "./platform";
+import { addPluginListener } from "@tauri-apps/api/core";
 import { runBack } from "./back";
 import Home from "./pages/Home";
 import Search, { RankPage } from "./pages/Search";
@@ -277,7 +278,7 @@ export default function App() {
      重新打开、失焦时再关闭，避免影响搜索/评论/登录等文本输入。 */
   useEffect(() => {
     if (platform !== "ios") return;
-    const setTI = (enabled: boolean) => invoke("set_text_interaction", { enabled }).catch(() => {});
+    const setTI = (enabled: boolean) => setTextInteraction(enabled).catch(() => {});
     const INPUTS = 'input, textarea, [contenteditable="true"]';
     const onDown = (e: Event) => {
       const t = e.target as HTMLElement | null;
@@ -308,7 +309,7 @@ export default function App() {
     if (loginOpen) { setLoginOpen(false); return; }
     if (stack.length) { pop(); return; }
     if (tab !== "home") { setTab("home"); return; }
-    invoke("plugin:app|exit", { code: 0 }).catch(() => {});
+    exitApp().catch(() => {});
   };
 
   useEffect(() => {
@@ -333,7 +334,7 @@ export default function App() {
   useEffect(() => {
     if (!import.meta.env.DEV) return;
     const t = window.setTimeout(() => {
-      selfTest().then((r) => { invoke("debug_log", { msg: r }).catch(() => {}); }).catch(() => {});
+      selfTest().then((r) => { logLine(r); }).catch(() => {});
     }, 2500);
     return () => window.clearTimeout(t);
   }, []);

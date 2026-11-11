@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { api, hostOf, isMobile, type LineItem, type LineProbe, type LineState } from "../api";
+import { api, hostOf, isMobile } from "../api";
+import type { LineItem, LineProbe, LineState } from "../types";
 import { tracePlayback } from "../player/diagnostics";
 import { useStore } from "../store";
 import { Modal, Sheet } from "./ui";

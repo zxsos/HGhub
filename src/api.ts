@@ -1,9 +1,16 @@
-import { invoke } from "@tauri-apps/api/core";
 import { tracePlayback } from "./player/diagnostics";
 import { dataCall, type DataCommand } from "./data/client";
+import { commands } from "./data/commands";
+import {
+  checkUpdate, clearCache, gateOpen, gateReset, gateState, lineAuto, lineHealth, lineMirrors,
+  lineProbe, lineSet, lineState, lineTryMain, logLine, netDiag, openUrl, securitySet,
+  setOrientation,
+} from "./platform";
 import type {
-  BootInfo, CommentPage, Detail, GateState, HotWord, Paged, PlayInfo, Post, PostCategory, RankItem, TagGroup, TopicCard, TopicDetail, User, UserProfile, VideoCard,
+  BootInfo, CommentPage, Detail, HotWord, Paged, PlayInfo, Post, PostCategory, RankItem, TagGroup, TopicCard, TopicDetail, User, UserProfile, VideoCard,
 } from "./types";
+
+export { logLine };
 
 /* ── 运行环境 ───────────────────────────────────────────── */
 
@@ -52,9 +59,6 @@ export const playlist = (url: string) => `${LOCAL}/hls?u=${encodeURIComponent(ur
 
 /* ── 调用封装 ───────────────────────────────────────────── */
 
-/** 写一行到应用数据目录 debug.log（用户反馈「打不开」时要的就是它） */
-export const logLine = (msg: string) => invoke("debug_log", { msg }).catch(() => {});
-
 /** 网络类失败的样子：没有 HTTP 状态码，纯链路层（DNS / 连接 / 超时 / TLS） */
 const NET_FAIL = /dns|timed? ?out|timeout|connection|refused|reset|unreachable|broken pipe|tls|ssl|handshake|证书|网络|连接/i;
 /** 只读命令：链路抖动时可以安全重试一次；写操作绝不重试（避免重复提交） */
@@ -76,37 +80,9 @@ const failMessage = (msg: string, status?: string) =>
     ? `服务器请求失败（HTTP ${status}），请稍后重试或在设置中切换线路`
     : msg.length > 140 ? `${msg.slice(0, 140)}…` : msg;
 
-/** 业务命令 → 壳层 DomainCommand 名。非业务命令（门牌/系统）继续直连。 */
-const DATA_COMMANDS: Record<string, string> = {
-  app_boot: "boot",
-  api_login: "login", api_register: "register", api_logout: "logout", api_me: "me",
-  api_feed: "feed", api_topics: "topics", api_topic: "topic", api_tags: "tags",
-  api_tag_videos: "tag_videos", api_category: "category", api_rank: "rank",
-  api_search: "search", api_search_hot: "search_hot",
-  api_posts: "posts", api_post: "post", api_post_playback: "post_playback",
-  api_post_like: "post_like", api_post_collect: "post_collect",
-  api_post_comments: "post_comments", api_post_categories: "post_categories", api_post_category: "post_category",
-  api_video: "video", api_play: "play", api_comments: "comments", api_comment_send: "comment_send",
-  api_like: "like", api_collect: "collect", api_follow: "follow", api_related: "related",
-  api_following: "following", api_user: "user", api_user_stats: "user_stats", api_user_videos: "user_videos",
-};
-
-/** 把旧的扁平参数转成 Rust `DomainCommand` 的字段形状。 */
-function domainCommand(cmd: string, args?: Record<string, unknown>): Record<string, unknown> | null {
-  const name = DATA_COMMANDS[cmd];
-  if (!name) return null;
-  const command: Record<string, unknown> = { cmd: name, ...(args || {}) };
-  if (name === "register") command.confirm_password = command.password ?? "";
-  if (name === "comment_send") { command.reply_id = command.replyId ?? 0; delete command.replyId; }
-  if (name === "search") command.kind = command.kind ?? "";
-  return command;
-}
-
-async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
-  const command = domainCommand(cmd, args);
-  const once = command
-    ? () => dataCall<T>(command as DataCommand)
-    : () => invoke(cmd, args) as Promise<T>;
+/** 统一业务调用：只走 DomainCommand → data_call；`label` 仅用于日志与重试白名单。 */
+async function call<T>(cmd: string, command: DataCommand): Promise<T> {
+  const once = () => dataCall<T>(command);
   try {
     const r = await once();
     notifyNet({ ok: true, cmd });
@@ -145,138 +121,84 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
 /* ── 接口 ───────────────────────────────────────────────── */
 
 export const api = {
-  boot: () => call<BootInfo>("app_boot"),
-  gateState: () => invoke<GateState>("gate_state"),
-  gateOpen: (address: string) => invoke<GateState>("gate_open", { address }),
-  gateReset: () => invoke<GateState>("gate_reset"),
-  securitySet: (strict: boolean) => call<boolean>("security_set", { strict }),
+  boot: () => call<BootInfo>("app_boot", commands.boot()),
+  gateState,
+  gateOpen,
+  gateReset,
+  securitySet,
   login: (username: string, password: string) =>
-    call<{ user: User }>("api_login", { username, password }),
+    call<{ user: User }>("api_login", commands.login(username, password)),
   register: (username: string, password: string, email = "") =>
-    call<{ user: User }>("api_register", { username, password, email }),
-  logout: () => call<{ ok: boolean }>("api_logout"),
-  me: () => call<User>("api_me"),
+    call<{ user: User }>("api_register", commands.register(username, password, email)),
+  logout: () => call<{ ok: boolean }>("api_logout", commands.logout()),
+  me: () => call<User>("api_me", commands.me()),
 
-  feed: (page = 1, size = 20) => call<Paged<VideoCard>>("api_feed", { page, size }),
-  topics: () => call<{ items: TopicCard[] }>("api_topics"),
-  topic: (slug: string) => call<TopicDetail>("api_topic", { slug }),
-  tags: () => call<{ categories: TagGroup[] }>("api_tags"),
+  feed: (page = 1, size = 20) => call<Paged<VideoCard>>("api_feed", commands.feed(page, size)),
+  topics: () => call<{ items: TopicCard[] }>("api_topics", commands.topics()),
+  topic: (slug: string) => call<TopicDetail>("api_topic", commands.topic(slug)),
+  tags: () => call<{ categories: TagGroup[] }>("api_tags", commands.tags()),
   tagVideos: (tag: string, page = 1, size = 20) =>
-    call<Paged<VideoCard>>("api_tag_videos", { tag, page, size }),
+    call<Paged<VideoCard>>("api_tag_videos", commands.tagVideos(tag, page, size)),
   category: (cate: string, page = 1, size = 20) =>
-    call<Paged<VideoCard>>("api_category", { cate, page, size }),
+    call<Paged<VideoCard>>("api_category", commands.category(cate, page, size)),
   rank: (kind: "hot" | "recommend" | "potential") =>
-    call<{ type: string; items: RankItem[] }>("api_rank", { kind }),
+    call<{ type: string; items: RankItem[] }>("api_rank", commands.rank(kind)),
   /** 全站搜索。`kind` 省略时后端只搜短剧；吃瓜帖要显式传 "post"（issue #34）。 */
   search: (q: string, page = 1, size = 20, kind?: "video" | "post") =>
     call<{ items: VideoCard[]; pagination: Paged<VideoCard>["pagination"]; keyword: string }>(
-      "api_search", { q, page, size, kind: kind ?? null },
+      "api_search", commands.search(q, page, size, kind ?? ""),
     ),
   /** 只搜吃瓜帖：返回结构是 Post 而不是 VideoCard。 */
   searchPosts: (q: string, page = 1, size = 20) =>
     call<{ items: Post[]; pagination: Paged<Post>["pagination"]; keyword: string }>(
-      "api_search", { q, page, size, kind: "post" },
+      "api_search", commands.search(q, page, size, "post"),
     ),
-  searchHot: () => call<{ items: HotWord[] }>("api_search_hot"),
-  posts: (page = 1, size = 20) => call<Paged<Post>>("api_posts", { page, size }),
-  post: (id: number) => call<Post & { content?: string; video_url?: string }>("api_post", { id }),
+  searchHot: () => call<{ items: HotWord[] }>("api_search_hot", commands.searchHot()),
+  posts: (page = 1, size = 20) => call<Paged<Post>>("api_posts", commands.posts(page, size)),
+  post: (id: number) => call<Post & { content?: string; video_url?: string }>("api_post", commands.post(id)),
   /** 吃瓜帖视频：详情里 video_url 恒为空，地址由 playback 接口下发（可能多段）。 */
-  postPlayback: (id: number) => call<{ mode?: number; videos?: { index: number; url: string }[] }>("api_post_playback", { id }),
+  postPlayback: (id: number) => call<{ mode?: number; videos?: { index: number; url: string }[] }>("api_post_playback", commands.postPlayback(id)),
 
-  video: (id: number) => call<Detail>("api_video", { id }),
-  play: (id: number, ep: number) => call<PlayInfo>("api_play", { id, ep }),
+  video: (id: number) => call<Detail>("api_video", commands.video(id)),
+  play: (id: number, ep: number) => call<PlayInfo>("api_play", commands.play(id, ep)),
 
   comments: (id: number, ep: number, page = 1, size = 20) =>
-    call<CommentPage>("api_comments", { id, ep, page, size }),
+    call<CommentPage>("api_comments", commands.comments(id, ep, page, size)),
   commentSend: (id: number, ep: number, text: string, replyId?: number) =>
-    call<unknown>("api_comment_send", { id, ep, text, replyId: replyId ?? null }),
+    call<unknown>("api_comment_send", commands.commentSend(id, ep, text, replyId)),
 
-  clearCache: () => invoke<void>("cache_clear"),
-  netDiag: () => invoke<Record<string, unknown>>("net_diag"),
-  /** 系统方向请求；页面不直接 invoke，统一从 api 门面走。 */
-  setOrientation: (landscape: boolean) => invoke<void>("set_orientation", { landscape }),
-  postLike: (id: number, on: boolean) => call<unknown>("api_post_like", { id, on }),
-  postCollect: (id: number, on: boolean) => call<unknown>("api_post_collect", { id, on }),
-  postComments: (id: number, page: number, size: number) => call<CommentPage>("api_post_comments", { id, page, size }),
-  postCategories: () => call<{ items: PostCategory[] }>("api_post_categories"),
+  clearCache,
+  netDiag,
+  setOrientation,
+  postLike: (id: number, on: boolean) => call<unknown>("api_post_like", commands.postLike(id, on)),
+  postCollect: (id: number, on: boolean) => call<unknown>("api_post_collect", commands.postCollect(id, on)),
+  postComments: (id: number, page: number, size: number) => call<CommentPage>("api_post_comments", commands.postComments(id, page, size)),
+  postCategories: () => call<{ items: PostCategory[] }>("api_post_categories", commands.postCategories()),
   postCategory: (route: string, page = 1, size = 20) =>
-    call<Paged<Post>>("api_post_category", { route, page, size }),
-  related: (id: number) => call<{ items: VideoCard[] }>("api_related", { id }),
-  following: (page = 1, size = 20) => call<Paged<VideoCard>>("api_following", { page, size }),
-  user: (id: number) => call<UserProfile>("api_user", { id }),
-  userStats: (id: number) => call<{ user_id: number; like_count: number; following: number; followers: number; video_count: number; post_count: number }>("api_user_stats", { id }),
-  userVideos: (id: number, page = 1, size = 20) => call<Paged<VideoCard>>("api_user_videos", { id, page, size }),
-  like: (id: number, ep: number, on: boolean) => call<unknown>("api_like", { id, ep, on }),
-  collect: (id: number, on: boolean) => call<unknown>("api_collect", { id, on }),
-  follow: (uid: number, on: boolean) => call<unknown>("api_follow", { uid, on }),
+    call<Paged<Post>>("api_post_category", commands.postCategory(route, page, size)),
+  related: (id: number) => call<{ items: VideoCard[] }>("api_related", commands.related(id)),
+  following: (page = 1, size = 20) => call<Paged<VideoCard>>("api_following", commands.following(page, size)),
+  user: (id: number) => call<UserProfile>("api_user", commands.user(id)),
+  userStats: (id: number) => call<{ user_id: number; like_count: number; following: number; followers: number; video_count: number; post_count: number }>("api_user_stats", commands.userStats(id)),
+  userVideos: (id: number, page = 1, size = 20) => call<Paged<VideoCard>>("api_user_videos", commands.userVideos(id, page, size)),
+  like: (id: number, ep: number, on: boolean) => call<unknown>("api_like", commands.like(id, ep, on)),
+  collect: (id: number, on: boolean) => call<unknown>("api_collect", commands.collect(id, on)),
+  follow: (uid: number, on: boolean) => call<unknown>("api_follow", commands.follow(uid, on)),
 
   /* 线路（数据源）：固定线路写死在 Rust 侧，镜像线路从地址发布页拉、推荐镜像从发布入口页拉 */
-  lineState: () => call<LineState>("line_state"),
-  lineSet: (url: string) => call<string>("line_set", { url }),
-  lineMirrors: () => call<LineMirrors>("line_mirrors"),
-  lineProbe: (urls: string[]) => call<LineProbe[]>("line_probe", { urls }),
-  lineAuto: () => call<LineAuto>("line_auto"),
+  lineState,
+  lineSet,
+  lineMirrors,
+  lineProbe,
+  lineAuto,
   /* 当前是镜像时敲一次主站，通了就切回（不清会话） */
-  lineTryMain: () => call<LineTryMain>("line_try_main"),
+  lineTryMain,
   /* 线路体检：探一次 /api/videos，和自动选线同一判据 */
-  lineHealth: () => call<LineHealth>("line_health"),
+  lineHealth,
 
   /* 更新检查：对比 GitHub Release 的 tag */
-  checkUpdate: () => call<UpdateInfo>("check_update"),
-  openUrl: (url: string) => call<void>("open_url", { url }),
-};
-
-/* ── 更新检查 ───────────────────────────────────────────── */
-
-export type UpdateInfo = {
-  /** 当前平台对应的安装包；没有就是这次 release 没给本平台出包 */
-  asset?: { name: string; url: string } | null;
-  current: string;
-  latest: string;
-  tag?: string;
-  has_update: boolean;
-  url: string;
-  name?: string;
-  published_at?: string;
-  notes?: string;
-};
-
-/* ── 线路（数据源） ─────────────────────────────────────── */
-
-export type LineItem = { name?: string; url: string; host?: string };
-export type LineState = { base: string; default: string; fixed: LineItem[] };
-export type LineMirrors = { source: string; script?: string; items: LineItem[]; recommended_source?: string; recommended: LineItem[] };
-export type LineProbe = { url: string; ok: boolean; status?: number; ms: number; error?: string };
-export type LineHealth = { base: string; ok: boolean; ms: number; status: number | null };
-
-/** 自动选线：只比 `.com` 与 `.ai` 两条，取通的那条、快的那条。 */
-export type LineAutoCandidate = {
-  tier: "main" | "cn" | "mirror";
-  url: string;
-  ok: boolean;
-  reachable: boolean;
-  ms: number;
-  status: number | null;
-};
-export type LineAuto = {
-  previous: string;
-  base: string;
-  switched: boolean;
-  pick: {
-    base: string;
-    tier: "main" | "cn" | "none";
-    ms: number;
-    reason: string;
-    candidates: LineAutoCandidate[];
-  };
-};
-
-/** 回切主站的探测结果：`probe.ok` 为主站到底通不通 */
-export type LineTryMain = {
-  previous: string;
-  base: string;
-  switched: boolean;
-  probe: { ok: boolean; base: string; tier: string; ms: number; status: number | null };
+  checkUpdate,
+  openUrl,
 };
 
 /** `https://a.b/c` → `a.b`（线路展示用） */
