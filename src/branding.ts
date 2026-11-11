@@ -1,6 +1,6 @@
 /** 品牌常量：所有用户可见名称只从这里取，组件里不再写死产品名。 */
-export const APP_NAME = "HGhub+";
-export const APP_TITLE = "HGhub+";
+export const APP_NAME = "HghubX";
+export const APP_TITLE = "HghubX";
 export const APP_DESC = "第三方客户端";
 export const APP_REPO = "https://github.com/zxsos/HGhub";
 

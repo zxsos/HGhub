@@ -1,13 +1,19 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useEffect, useRef, useSyncExternalStore, type RefObject } from "react";
+import {
+  useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore,
+  type ChangeEvent, type PointerEvent, type RefObject,
+} from "react";
 import Hls from "hls.js";
 import type { FragBufferedData, FragLoadedData, FragLoadingData } from "hls.js";
-import { copyText } from "./clipboard";
+import { copyText } from "../clipboard";
 
 type Data = Record<string, unknown>;
+export type PlaybackTrace = (event: string, data?: Record<string, unknown>) => void;
 type Status = { enabled: boolean; path: string | null; error: string | null };
 type Entry = { event: string; data: Data };
 type Snapshot = Status & { ready: boolean; pending: boolean };
+
+/* ── 播放诊断日志 ───────────────────────────────────────── */
 
 // Separate transport also lets browser regressions verify diagnostics without Tauri or upstream.
 export const playbackLogApi = {
@@ -78,6 +84,8 @@ export async function copyPlaybackLog() {
   await copyText(text);
 }
 
+/* ── 媒体标识与快照 ─────────────────────────────────────── */
+
 export function mediaResource(raw: string) {
   try {
     const url = new URL(raw);
@@ -122,6 +130,8 @@ export function usePlayerDiagnostics(videoRef: RefObject<HTMLVideoElement | null
   const id = useRef<string>("");
   if (!id.current) id.current = `player-${++nextPlayer}`;
   const current = useRef(context); current.current = context;
+  const pending = useRef<{ id: number; target: number; start: number; seeks: number; seeked: boolean } | null>(null);
+  const seekSeq = useRef(0);
   const snapshot = () => {
     const v = videoRef.current;
     return { player: id.current, ...current.current, ...(v ? mediaSnapshot(v, hlsRef.current) : {}) };
@@ -130,8 +140,6 @@ export function usePlayerDiagnostics(videoRef: RefObject<HTMLVideoElement | null
     if (!playbackLogEnabled()) return;
     try { tracePlayback(event, { ...snapshot(), seek: pending.current?.id, ...data }); } catch { /* diagnostics must never interrupt playback */ }
   };
-  const pending = useRef<{ id: number; target: number; start: number; seeks: number; seeked: boolean } | null>(null);
-  const seekSeq = useRef(0);
   const requestSeek = (target: number, source: string) => {
     if (!playbackLogEnabled()) return;
     const previous = pending.current;
@@ -236,4 +244,176 @@ export function installPlaybackPageEvents() {
   document.addEventListener("visibilitychange", () => tracePlayback("page.visibility", { visibility: document.visibilityState }));
   window.addEventListener("pagehide", () => { tracePlayback("page.hide"); void flushPlaybackLog(); });
   document.addEventListener("securitypolicyviolation", e => tracePlayback("security.csp_violation", { directive: e.effectiveDirective, disposition: e.disposition, resource: mediaResource(e.blockedURI) }));
+}
+
+/* ── 媒体错误提示 ───────────────────────────────────────── */
+
+const isLinuxClient = () => {
+  const ua = navigator.userAgent;
+  const android = /Android/i.test(ua);
+  const ios = /iPhone|iPad|iPod/i.test(ua) ||
+    (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const macos = !ios && /Macintosh|Mac OS X/i.test(ua);
+  return !android && !ios && !macos && /Linux|X11/i.test(ua);
+};
+
+export function mediaErrorMessage(error: MediaError | null): string {
+  switch (error?.code) {
+    case 2:
+      return "网络错误，视频加载失败，请检查网络后重试";
+    case 3:
+      return "视频解码失败，请重试";
+    case 4:
+      return isLinuxClient()
+        ? "当前系统缺少 H.264/AAC 解码器，请安装 gstreamer1.0-libav 和 gstreamer1.0-plugins-bad 后重试"
+        : "当前视频格式不受支持";
+    default:
+      return "视频加载失败，请重试";
+  }
+}
+
+/* ── 播放活动控制 ───────────────────────────────────────── */
+
+/** Keep asynchronous autoplay and error recovery subject to the latest page activity. */
+export function usePlaybackActivity(
+  videoRef: RefObject<HTMLVideoElement | null>, hlsRef: RefObject<Hls | null>,
+  { active, autoPlay, src, trace }: { active: boolean; autoPlay: boolean; src: string; trace: (event: string, data?: Record<string, unknown>) => void },
+) {
+  const latest = useRef({ active, trace }); latest.current = { active, trace };
+  const wanted = useRef(autoPlay);
+  const mounted = useRef(true);
+  const previous = useRef(active);
+  useLayoutEffect(() => { wanted.current = autoPlay; }, [src, autoPlay]);
+
+  const play = useCallback((source: string, automatic = false) => {
+    const v = videoRef.current;
+    if (!v) return;
+    if (!mounted.current || !latest.current.active || (automatic && !wanted.current)) {
+      latest.current.trace("play.blocked", { source, inactive: !latest.current.active, play_wanted: wanted.current });
+      return;
+    }
+    wanted.current = true;
+    const hls = hlsRef.current;
+    if (hls?.levels.length && !hls.loadingEnabled) hls.startLoad(v.currentTime);
+    latest.current.trace("play.request", { source });
+    v.play().then(() => {
+      // The page may have changed while play() was pending.
+      if (!mounted.current || !latest.current.active) v.pause();
+    }).catch(e => latest.current.trace("play.rejected", { source, error_name: e?.name }));
+  }, []);
+  const pause = useCallback((source = "handle") => {
+    wanted.current = false;
+    latest.current.trace("pause.request", { source });
+    videoRef.current?.pause();
+  }, []);
+
+  useLayoutEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    mounted.current = true;
+    const hls = hlsRef.current;
+    if (!active) {
+      // Include pauses made through native/PiP controls, which bypass our buttons.
+      if (v.readyState >= 2) wanted.current = !v.paused;
+      v.pause();
+      // Let an in-flight manifest finish, but stop fragment loading for hidden pages.
+      if (hls?.levels.length) hls.stopLoad();
+      latest.current.trace("page.suspended", { play_wanted: wanted.current });
+    } else if (!previous.current) {
+      if (hls?.levels.length && !hls.loadingEnabled) hls.startLoad(v.currentTime);
+      if (wanted.current && (hls?.levels.length || v.readyState > 0)) play("page_active", true);
+    }
+    previous.current = active;
+  }, [active, play]);
+
+  useLayoutEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    const guard = () => {
+      if (latest.current.active) return;
+      latest.current.trace("play.blocked", { source: "media_event", inactive: true });
+      v.pause();
+      if (hlsRef.current?.levels.length) hlsRef.current.stopLoad();
+    };
+    v.addEventListener("play", guard);
+    v.addEventListener("playing", guard);
+    return () => { mounted.current = false; v.removeEventListener("play", guard); v.removeEventListener("playing", guard); v.pause(); };
+  }, []);
+  return { play, pause, isActive: () => mounted.current && latest.current.active };
+}
+
+/* ── 进度拖动输入 ───────────────────────────────────────── */
+
+type SeekInputProps = {
+  time: number; duration: number; enabled?: boolean; resetKey?: string;
+  onSeek: (time: number, input: string) => void;
+  onInteraction?: (phase: string, input: string, target: number, pointerTarget?: number) => void;
+};
+
+/** Preview pointer movement locally; commit a single seek on release. Keyboard stays native. */
+export function useSeekInput({ time, duration, enabled = true, resetKey, onSeek, onInteraction }: SeekInputProps) {
+  const [preview, setPreview] = useState<number | null>(null);
+  const pointer = useRef<{ id: number; x: number; moved: boolean; target: number; el: HTMLInputElement } | null>(null);
+  const latest = useRef({ onSeek, onInteraction }); latest.current = { onSeek, onInteraction };
+  const seekable = enabled && Number.isFinite(duration) && duration > 0;
+  const release = () => {
+    const p = pointer.current; pointer.current = null;
+    if (p?.el.hasPointerCapture(p.id)) p.el.releasePointerCapture(p.id);
+  };
+  const cancel = () => {
+    const p = pointer.current;
+    if (p) latest.current.onInteraction?.("cancel", p.moved ? "drag" : "click", p.target);
+    release(); setPreview(null);
+  };
+  useEffect(() => { cancel(); }, [seekable, duration, resetKey]);
+  useEffect(() => () => { release(); }, []);
+  const targetAt = (e: PointerEvent<HTMLInputElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    return rect.width ? Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)) * duration : 0;
+  };
+  const displayTime = preview ?? time;
+  return {
+    time: displayTime,
+    inputProps: {
+      disabled: !seekable, min: 0, max: seekable ? duration : 1, step: .01,
+      value: Math.max(0, Math.min(displayTime, seekable ? duration : 0)),
+      style: { touchAction: "none" },
+      onPointerDown: (e: PointerEvent<HTMLInputElement>) => {
+        if (!seekable || e.button !== 0 || pointer.current) return;
+        e.preventDefault();
+        e.currentTarget.focus({ preventScroll: true });
+        const target = targetAt(e);
+        pointer.current = { id: e.pointerId, x: e.clientX, moved: false, target, el: e.currentTarget };
+        e.currentTarget.setPointerCapture(e.pointerId);
+        setPreview(target);
+        latest.current.onInteraction?.("down", "pointer", time, target);
+        latest.current.onInteraction?.("change", "click", target);
+      },
+      onPointerMove: (e: PointerEvent<HTMLInputElement>) => {
+        const p = pointer.current;
+        if (!p || p.id !== e.pointerId) return;
+        if (Math.abs(e.clientX - p.x) > 3) p.moved = true;
+        p.target = targetAt(e); setPreview(p.target);
+        latest.current.onInteraction?.("change", p.moved ? "drag" : "click", p.target);
+      },
+      onPointerUp: (e: PointerEvent<HTMLInputElement>) => {
+        const p = pointer.current;
+        if (!p || p.id !== e.pointerId) return;
+        const target = targetAt(e), input = p.moved ? "drag" : "click";
+        release(); setPreview(null);
+        latest.current.onInteraction?.("up", input, target);
+        if (seekable) latest.current.onSeek(target, input);
+      },
+      onPointerCancel: cancel,
+      onLostPointerCapture: () => { if (pointer.current) cancel(); },
+      onBlur: cancel,
+      onChange: (e: ChangeEvent<HTMLInputElement>) => {
+        if (!seekable || pointer.current) return;
+        const target = Number(e.target.value);
+        latest.current.onInteraction?.("change", "keyboard", target);
+        latest.current.onSeek(target, "keyboard");
+      },
+    },
+  };
 }

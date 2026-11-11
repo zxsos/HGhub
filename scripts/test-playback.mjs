@@ -1,7 +1,6 @@
 // Local-only headless playback checks. No upstream APIs, credentials or Tauri IPC are used.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import { createServer as createHttpServer } from "node:http";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { appendFileSync } from "node:fs";
@@ -19,19 +18,15 @@ const { values: args } = parseArgs({ options: {
 } });
 if (args.help) {
   console.log("pnpm test:playback [--media-dir DIR] [--output NEW_DIR] [--browser-executable PATH] [--scenarios seek,legacy,stall,lifecycle,mms]");
-  console.log("Env: BROWSER_EXECUTABLE (fallback for --browser-executable), FFMPEG_PATH (only needed when the fixture is generated).");
   process.exit(0);
 }
-const FIXTURE_SPEC = { duration: 90, size: "320x180", rate: 15, hls_time: 2, video: "libx264", audio: "aac" };
-const FIXTURE_KEY = createHash("sha256").update(JSON.stringify(FIXTURE_SPEC)).digest("hex").slice(0, 16);
-const browserExecutable = args["browser-executable"] || process.env.BROWSER_EXECUTABLE;
 const scenarios = args.scenarios.split(",");
 assert(scenarios.length && scenarios.every(s => ["seek", "legacy", "stall", "lifecycle", "mms"].includes(s)), "Unknown scenario");
 const output = resolve(args.output || join(root, "test-results", "playback", new Date().toISOString().replace(/[:.]/g, "-")));
 await mkdir(dirname(output), { recursive: true });
 await mkdir(output); // Refuse to overwrite artifacts from an earlier run.
 const jsonl = (file, entry) => appendFileSync(file, JSON.stringify({ ts: new Date().toISOString(), ...entry }) + "\n");
-const report = { started: new Date().toISOString(), platform: process.platform, browser: "chromium", transport: "browser fixture; not Tauri/WKWebView", output, media_fixture: { key: FIXTURE_KEY }, cases: [] };
+const report = { started: new Date().toISOString(), platform: process.platform, browser: "chromium", transport: "browser fixture; not Tauri/WKWebView", output, cases: [] };
 let temporaryMedia, vite, media, browser;
 let nextRequest = 0;
 const requests = new Set();
@@ -41,22 +36,6 @@ const fixtureMediaUrl = raw => {
   const url = new URL(raw);
   return fixtureMediaOrigins.has(url.origin) ? new URL(`${url.pathname}${url.search}`, report.media).href : raw;
 };
-
-async function hasFixture(dir) {
-  try {
-    const key = (await readFile(join(dir, ".fixture-key"), "utf8")).trim();
-    const manifest = await readFile(join(dir, "list.m3u8"), "utf8");
-    return key === FIXTURE_KEY && manifest.startsWith("#EXTM3U") && manifest.includes("#EXT-X-ENDLIST");
-  } catch { return false; }
-}
-
-async function generateFixture(dir) {
-  await mkdir(dir, { recursive: true });
-  try {
-    execFileSync(process.env.FFMPEG_PATH || "ffmpeg", ["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", `testsrc2=size=${FIXTURE_SPEC.size}:rate=${FIXTURE_SPEC.rate}`, "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100", "-t", String(FIXTURE_SPEC.duration), "-c:v", FIXTURE_SPEC.video, "-preset", "ultrafast", "-g", "30", "-sc_threshold", "0", "-pix_fmt", "yuv420p", "-c:a", FIXTURE_SPEC.audio, "-f", "hls", "-hls_time", String(FIXTURE_SPEC.hls_time), "-hls_playlist_type", "vod", "-hls_segment_filename", join(dir, "seg%03d.ts"), join(dir, "list.m3u8")], { timeout: 60000, stdio: "pipe" });
-  } catch { throw new Error("Cannot generate HLS fixture: install FFmpeg (libx264/AAC), set FFMPEG_PATH, or pass a cached --media-dir DIR"); }
-  await writeFile(join(dir, ".fixture-key"), `${FIXTURE_KEY}\n`);
-}
 
 async function serveMedia(dir) {
   const manifest = await readFile(join(dir, "list.m3u8"), "utf8");
@@ -307,14 +286,14 @@ try {
   let mediaDir = args["media-dir"] && resolve(args["media-dir"]);
   if (!mediaDir) {
     temporaryMedia = await mkdtemp(join(tmpdir(), "hghub-playback-")); mediaDir = temporaryMedia;
+    try {
+      execFileSync(process.env.FFMPEG_PATH || "ffmpeg", ["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=15", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100", "-t", "90", "-c:v", "libx264", "-preset", "ultrafast", "-g", "30", "-sc_threshold", "0", "-pix_fmt", "yuv420p", "-c:a", "aac", "-f", "hls", "-hls_time", "2", "-hls_playlist_type", "vod", "-hls_segment_filename", join(mediaDir, "seg%03d.ts"), join(mediaDir, "list.m3u8")], { timeout: 60000, stdio: "pipe" });
+    } catch { throw new Error("Cannot generate HLS fixture: install FFmpeg (libx264/AAC), set FFMPEG_PATH, or pass --media-dir DIR"); }
   }
-  const fixtureReused = await hasFixture(mediaDir);
-  if (!fixtureReused) await generateFixture(mediaDir);
-  report.media_fixture = { ...report.media_fixture, dir: mediaDir, reused: fixtureReused };
   vite = await createViteServer({ root, server: { host: "127.0.0.1", port: 0, strictPort: false, hmr: false, open: false } });
   await vite.listen(); report.ui = `http://127.0.0.1:${vite.httpServer.address().port}`;
   media = await serveMedia(mediaDir); report.media = `http://127.0.0.1:${media.address().port}`;
-  browser = await chromium.launch({ headless: true, executablePath: browserExecutable, args: ["--autoplay-policy=no-user-gesture-required"] });
+  browser = await chromium.launch({ headless: true, executablePath: args["browser-executable"], args: ["--autoplay-policy=no-user-gesture-required"] });
   report.browser_version = browser.version();
   for (const name of scenarios) {
     const dir = join(output, name); await mkdir(dir);

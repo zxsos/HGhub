@@ -8,15 +8,16 @@ import Search, { RankPage } from "./pages/Search";
 import Category, { ChannelPage } from "./pages/Category";
 import Profile from "./pages/Profile";
 import SettingsPage from "./pages/Settings";
-import Feed from "./components/Feed";
+import Feed from "./pages/Feed";
 import { PostsPage, PostDetail } from "./pages/Posts";
 import { TopicsPage, TopicPage, TagsPage, TagPage } from "./pages/Discover";
 import { FollowingPage, UserPage } from "./pages/User";
 import LoginModal from "./components/LoginModal";
+import SourceGate from "./components/SourceGate";
 import { ToastHost } from "./components/ui";
 import { DesktopRail, DesktopTitleBar } from "./components/DesktopChrome";
 import ResizeHandles from "./components/ResizeHandles";
-import { tracePlayback } from "./playbackDiagnostics";
+import { tracePlayback } from "./player/diagnostics";
 import { IGrid, IGridF, IHome, IHomeF, ISearch, IUser, IUserF, Logo } from "./icons";
 
 /* ============ 底部标签栏（移动端）—— iOS 26 液态玻璃悬浮胶囊 ============ */
@@ -26,7 +27,8 @@ import { IGrid, IGridF, IHome, IHomeF, ISearch, IUser, IUserF, Logo } from "./ic
      用 CSS transition + cubic-bezier 近似 WeChat-LiquidGlass 的 DampedDragAnimation）
    - 按压时液滴放大（对齐其 press scale 1.1x），图标带充色 */
 function TabBar() {
-  const { tab, setTab, theme } = useStore();
+  const { tab, setTab, theme, platform } = useStore();
+  const android = platform === "android";
   const items: { k: Tab; label: string; On: (p: { size?: number; className?: string; style?: React.CSSProperties; strokeWidth?: number }) => React.JSX.Element; Off: (p: { size?: number; className?: string; style?: React.CSSProperties; strokeWidth?: number }) => React.JSX.Element }[] = [
     { k: "home", label: "首页", On: IHomeF, Off: IHome },
     { k: "search", label: "搜索", On: ISearch, Off: ISearch },
@@ -40,7 +42,7 @@ function TabBar() {
   const dropLeft = `${12.5 + idx * 25}%`;
   return (
     <nav className="hg-tabbar absolute inset-x-0 bottom-0 z-30 flex justify-center"
-      style={{ paddingBottom: "calc(var(--sab, 0px) * 0.55)" }} aria-label="主导航">
+      style={{ paddingBottom: android ? "var(--sab, 0px)" : "calc(var(--sab, 0px) * 0.55)" }} aria-label="主导航">
       <div className="hg-glass relative" style={{
         width: "min(92vw, 420px)",
         height: 56,
@@ -255,7 +257,7 @@ function MobileShell() {
   const { platform } = useStore();
   return (
     <div className={`absolute inset-0 flex flex-col bg-canvas plat-${platform}`}
-      style={{ "--sat": "max(env(safe-area-inset-top), 12px)", "--sab": "max(env(safe-area-inset-bottom), 16px)" } as React.CSSProperties}>
+      style={{ "--sat": "max(env(safe-area-inset-top), 12px)", "--sab": platform === "android" ? "max(env(safe-area-inset-bottom), 24px)" : "max(env(safe-area-inset-bottom), 16px)" } as React.CSSProperties}>
       <div className="relative flex-1 min-h-0">
         <AppBody />
       </div>
@@ -265,7 +267,7 @@ function MobileShell() {
 
 /* ============ 入口 ============ */
 export default function App() {
-  const { platform, loginOpen, setLoginOpen, tab, setTab, stack, pop, fs, setFs } = useStore();
+  const { platform, loginOpen, setLoginOpen, tab, setTab, stack, pop, fs, setFs, gate, gateReady } = useStore();
   useEffect(() => {
     tracePlayback("navigation.change", { tab, stack: stack.map(p => ({ page: p.kind, key: p.key })), login_open: loginOpen });
   }, [tab, stack, loginOpen]);
@@ -335,6 +337,13 @@ export default function App() {
     }, 2500);
     return () => window.clearTimeout(t);
   }, []);
+
+  if (!gateReady) {
+    return <div className="absolute inset-0 bg-canvas" aria-busy="true" />;
+  }
+  if (!gate.activated) {
+    return <SourceGate />;
+  }
 
   return (
     <>

@@ -113,7 +113,7 @@ export function Logo({ size = 28, className = "" }: { size?: number; className?:
         <path d="M31 17.5c3.2 0 5.5 2.6 5.5 6.5S34.2 30.5 31 30.5" stroke="#60cdff" strokeWidth="4" strokeLinecap="round" fill="none" />
       </g>
       <path d="M40 27.2 46.3 31.9 40 36.6Z" fill="#b1f5dc" />
-      <path d="M49.6 10.6v7.2M46 14.2h7.2" stroke="#b1f5dc" strokeWidth="2.9" strokeLinecap="round" />
+      <path d="M46.7 11.3 52.5 17.1M52.5 11.3 46.7 17.1" stroke="#b1f5dc" strokeWidth="2.9" strokeLinecap="round" />
     </svg>
   );
 }

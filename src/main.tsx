@@ -4,15 +4,13 @@ import App from "./App";
 import { AppProvider } from "./store";
 import { invoke } from "@tauri-apps/api/core";
 import "./index.css";
-import { initPlaybackLog, installPlaybackPageEvents, tracePlayback } from "./playbackDiagnostics";
-import { initAutoLine } from "./autoLine";
+import { initPlaybackLog, installPlaybackPageEvents, tracePlayback } from "./player/diagnostics";
 import { APP_VERSION, LOCAL, logLine, platform, webviewVersion } from "./api";
 import Hls from "hls.js";
 import { installLayoutDiagnostics } from "./layoutDiagnostics";
 installPlaybackPageEvents();
 void initPlaybackLog();
 /* 自动选线：启动时比一次 com / ai，之后跟着网络变化复查 */
-initAutoLine();
 /* 环境指纹：写进始终记录的 debug.log。用户复制诊断时不用再自报版本、平台、内核版本 */
 logLine(
   `[env] ver=${APP_VERSION} platform=${platform} webview=${webviewVersion} ` +
