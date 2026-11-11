@@ -27,7 +27,20 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Install local media generator and headless browser
         run: |
-          sudo apt-get update
+                - name: Point apt at Tsinghua mirror
+        run: |
+          set -euo pipefail
+          sudo sed -i -E \
+            -e 's#https?://(azure\.archive\.ubuntu\.com|archive\.ubuntu\.com|security\.ubuntu\.com)/ubuntu/?#https://mirrors.tuna.tsinghua.edu.cn/ubuntu/#g' \
+            /etc/apt/sources.list.d/ubuntu.sources
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            sudo sed -i -E \
+              -e 's#https?://(azure\.archive\.ubuntu\.com|archive\.ubuntu\.com|security\.ubuntu\.com)/ubuntu/?#https://mirrors.tuna.tsinghua.edu.cn/ubuntu/#g' \
+              /etc/apt/apt-mirrors.txt
+          fi
+          grep -Rhn -E 'URIs|archive|tuna' /etc/apt/sources.list.d/ubuntu.sources /etc/apt/apt-mirrors.txt || true
+
+sudo apt-get -o Acquire::Retries=3 update
           sudo apt-get install -y ffmpeg
           pnpm exec playwright-core install --with-deps chromium
       - name: Run playback checks and collect diagnostics
