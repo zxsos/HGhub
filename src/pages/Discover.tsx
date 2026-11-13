@@ -84,28 +84,20 @@ export function TopicPage({ slug, name, onBack, wide }: { slug: string; name: st
   const [topic, setTopic] = useState<TopicCard | null>(null);
   const [related, setRelated] = useState<TopicCard[]>([]);
   const [videos, setVideos] = useState<VideoCard[]>([]);
-  const [page, setPage] = useState(0);
-  const [pages, setPages] = useState(1);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const busy = useRef(false);
-  const sentinel = useRef<HTMLDivElement>(null);
 
-  const loadMore = useCallback(async () => {
-    if (busy.current || page >= pages) return;
+  /* 专题详情接口一次返回完整视频列表，不支持独立分页。 */
+  const load = useCallback(async () => {
+    if (busy.current) return;
     busy.current = true;
-    setLoading(true);
+    if (!videos.length) setLoading(true);
     try {
       const res = await api.topic(slug);
       setTopic(res?.topic || null);
       setRelated(res?.related || []);
-      const next = page + 1;
-      const items = res?.videos?.items || [];
-      const pag = res?.videos?.pagination;
-      // 详情接口只回第一页；后续页用 /api/videos/tag 无法等价，先只支持第一页内的分页翻取
-      setVideos(items);
-      setPage(pag?.page || next);
-      setPages(pag?.pages || 1);
+      setVideos(res?.videos?.items || []);
       setErr("");
     } catch (e) {
       setErr((e as Error).message || "加载失败");
@@ -114,9 +106,9 @@ export function TopicPage({ slug, name, onBack, wide }: { slug: string; name: st
       busy.current = false;
       setLoading(false);
     }
-  }, [page, pages, slug, toast]);
+  }, [slug, toast, videos.length]);
 
-  useEffect(() => { loadMore(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [slug]);
 
   return (
     <div className="ios-page absolute inset-0 bg-bg flex flex-col">
@@ -125,7 +117,7 @@ export function TopicPage({ slug, name, onBack, wide }: { slug: string; name: st
           <Button aria-label="返回" onClick={onBack} className="w-10 h-10 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable"><IBack size={20} /></Button>
           <div className="flex-1 min-w-0">
             <div className="text-[16px] font-bold text-on truncate">{topic?.title || name}</div>
-            <div className="text-[12px] text-mut">{topic?.video_count ?? 0} 部 · {videos.length} 已加载</div>
+            <div className="text-[12px] text-mut">共 {topic?.video_count ?? videos.length} 部</div>
           </div>
           <Button onClick={() => setSearching(true)} aria-label="搜索短剧" className="ml-auto w-9 h-9 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable"><ISearch size={19} /></Button>
         </div>
@@ -154,15 +146,13 @@ export function TopicPage({ slug, name, onBack, wide }: { slug: string; name: st
         {loading && !videos.length ? (
           <div className="flex justify-center py-12"><Loader className="w-8 h-8 spinner" /></div>
         ) : err && !videos.length ? (
-          <Empty icon={<TopicIcon size={26} />} title="加载失败" sub={err} action="重试" onAction={loadMore} />
+          <Empty icon={<TopicIcon size={26} />} title="加载失败" sub={err} action="重试" onAction={load} />
         ) : videos.length ? (
           <Masonry videos={videos} wide={wide} onOpen={(v) => push({ kind: "feed", videoIds: videos.map((x) => x.id), index: videos.findIndex((x) => x.id === v.id), title: topic?.title || name })} />
         ) : (
           <Empty icon={<TopicIcon size={26} />} title="暂无内容" />
         )}
-        <div ref={sentinel} className="h-8" />
         {loading && videos.length > 0 && <div className="flex justify-center py-3"><Loader className="w-6 h-6 spinner" /></div>}
-        {!loading && videos.length > 0 && page >= pages && <div className="text-center text-[12px] text-dim py-3">— 已经到底啦 —</div>}
         {wide && <div className="h-2" />}
       </div>
       {searching && <InplaceSearch kind="video" wide={wide} onClose={() => setSearching(false)} onOpenVideo={(v, list) => push({ kind: "feed", videoIds: list.map((x) => x.id), index: list.findIndex((x) => x.id === v.id), title: topic?.title || name })} />}
