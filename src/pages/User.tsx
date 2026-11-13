@@ -103,13 +103,14 @@ export function UserPage({ id, name, onBack, wide }: { id: number; name?: string
   const [pages, setPages] = useState(1);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
+  const [followBusy, setFollowBusy] = useState(false);
   const busy = useRef(false);
   const sentinel = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let alive = true;
-    api.user(id).then((u) => { if (alive) setProfile(u); }).catch(() => {});
-    api.userStats(id).then((s) => { if (alive) setStats(s); }).catch(() => {});
+    api.user(id).then((u) => { if (alive) setProfile(u); }).catch((e) => { if (alive) toast((e as Error).message || "用户资料加载失败", "info"); });
+    api.userStats(id).then((s) => { if (alive) setStats(s); }).catch((e) => { if (alive) toast((e as Error).message || "用户统计加载失败", "info"); });
     return () => { alive = false; };
   }, [id]);
 
@@ -147,11 +148,20 @@ export function UserPage({ id, name, onBack, wide }: { id: number; name?: string
   }, [page, pages]);
 
   const following = follows.includes(id);
-  const onFollow = () => {
-    const on = toggleFollowLocal(id);
-    toast(on ? `已关注 ${profile?.nickname || name || ""}` : "已取消关注", on ? "ok" : "info");
+  const onFollow = async () => {
+    if (followBusy) return;
     if (!user) { setLoginOpen(true); return; }
-    api.follow(id, on).catch(() => {});
+    const on = toggleFollowLocal(id);
+    setFollowBusy(true);
+    try {
+      await api.follow(id, on);
+      toast(on ? `已关注 ${profile?.nickname || name || ""}` : "已取消关注", on ? "ok" : "info");
+    } catch (e) {
+      toggleFollowLocal(id);
+      toast((e as Error).message || "关注操作失败，状态已恢复", "info");
+    } finally {
+      setFollowBusy(false);
+    }
   };
 
   return (
@@ -177,9 +187,9 @@ export function UserPage({ id, name, onBack, wide }: { id: number; name?: string
               <span>获赞 <b className="text-on">{fmt(stats.like_count)}</b></span>
             </div>
           </div>
-          <Button onClick={onFollow}
-            className={`h-8 px-3.5 rounded-full text-[12px] font-semibold pressable shrink-0 ${following ? "bg-s3 text-mut" : "bg-primary text-on-primary"}`}>
-            {following ? "已关注" : "+ 关注"}
+          <Button onClick={onFollow} disabled={followBusy}
+            className={`min-h-11 px-3.5 rounded-full text-[12px] font-semibold pressable shrink-0 disabled:opacity-60 ${following ? "bg-s3 text-mut" : "bg-primary text-on-primary"}`}>
+            {followBusy ? "处理中…" : following ? "已关注" : "+ 关注"}
           </Button>
         </Surface>
 

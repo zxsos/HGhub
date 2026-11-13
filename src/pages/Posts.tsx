@@ -20,6 +20,7 @@ export function PostsPage({ onBack, wide }: { onBack: () => void; wide: boolean 
   const [page, setPage] = useState(0);
   const [pages, setPages] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
   const busy = useRef(false);
   const sentinel = useRef<HTMLDivElement>(null);
 
@@ -38,7 +39,10 @@ export function PostsPage({ onBack, wide }: { onBack: () => void; wide: boolean 
       });
       setPage(next);
       setPages(res?.pagination?.pages || next);
-    } catch { /* ignore */ } finally {
+      setErr("");
+    } catch (e) {
+      setErr((e as Error).message || "吃瓜内容加载失败");
+    } finally {
       busy.current = false;
       setLoading(false);
     }
@@ -71,10 +75,18 @@ export function PostsPage({ onBack, wide }: { onBack: () => void; wide: boolean 
           </div>
         ) : loading ? (
           <div className="flex justify-center py-12"><Loader className="w-8 h-8 spinner" /></div>
+        ) : err ? (
+          <Empty icon={<IFireF size={26} />} title="吃瓜内容加载失败" sub={err} action="重试" onAction={() => loadMore(true)} />
         ) : (
           <Empty icon={<IFireF size={26} />} title="暂无吃瓜内容" sub="稍后再来看看" />
         )}
         <div ref={sentinel} className="h-10" />
+        {err && items.length > 0 && (
+          <div className="flex items-center justify-center gap-3 py-2 text-[11px] text-danger" role="alert">
+            <span>加载更多失败：{err}</span>
+            <button onClick={() => loadMore()} className="text-primary pressable">重试</button>
+          </div>
+        )}
         {loading && <div className="flex justify-center py-2"><Loader className="w-6 h-6 spinner" /></div>}
       </div>
       {searching && <InplaceSearch kind="post" postLabel="吃瓜帖子" wide={wide} onClose={() => setSearching(false)} onOpenPost={(p) => push({ kind: "post", id: p.id })} />}
@@ -108,6 +120,8 @@ export function PostDetail({ id, onBack, active = true }: { id: number; onBack: 
 
   useEffect(() => {
     let alive = true;
+    setPost(null);
+    setErr(null);
     setPlay(false);
     setSegs([]);
     setSeg(0);
@@ -154,7 +168,8 @@ export function PostDetail({ id, onBack, active = true }: { id: number; onBack: 
                     if (seg < segs.length - 1) setSeg(seg + 1); else setPlay(false);
                   }} />
               ) : (
-                <Button onClick={() => { if (src) setPlay(true); else if (!resolving) toast("该帖子没有视频", "info"); }} className="absolute inset-0">
+                <Button aria-label={src ? "播放视频" : resolving ? "正在解析视频" : "播放视频"}
+                  onClick={() => { if (src) setPlay(true); else if (!resolving) toast("该帖子没有视频", "info"); }} className="absolute inset-0">
                   <Img src={post.cover} eager />
                   {src && (
                     <span className="absolute inset-0 flex items-center justify-center">

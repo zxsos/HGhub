@@ -258,13 +258,14 @@ export function RankPage({ onBack, wide }: { onBack: () => void; wide: boolean }
   const [tab, setTab] = useState<"hot" | "recommend" | "potential">("hot");
   const [items, setItems] = useState<RankItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
 
   useEffect(() => {
     let alive = true;
     setLoading(true);
     api.rank(tab)
       .then((res) => { if (alive) setItems(res?.items || []); })
-      .catch((e) => { if (alive) { setItems([]); toast((e as Error).message || "榜单加载失败", "info"); } })
+      .catch((e) => { if (alive) { setItems([]); setErr((e as Error).message || "榜单加载失败"); toast((e as Error).message || "榜单加载失败", "info"); } })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [tab, toast]);
@@ -298,6 +299,8 @@ export function RankPage({ onBack, wide }: { onBack: () => void; wide: boolean }
       <div className="flex-1 scroll-y px-3.5 pt-3 pb-8">
         {loading ? (
           <div className="flex justify-center py-12"><Loader className="w-8 h-8 spinner" /></div>
+        ) : err ? (
+          <Empty icon={<ITrophy size={26} />} title="榜单加载失败" sub={err} action="重试" onAction={() => setTab(tab)} />
         ) : items.length ? (
           items.map((it) => (
             <RankRow key={`${it.video_id}-${it.rank}`} item={it} metricMax={max}
