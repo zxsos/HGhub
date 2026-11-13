@@ -123,7 +123,7 @@ export default function Profile({ wide }: { wide: boolean }) {
               sub={tab === "fav" ? "在剧集页点收藏，之后就能在这里找到" : "看过的剧集会出现在这里"}
               action="去逛逛" onAction={() => push({ kind: "ranks" })} />
           )}
-          {cards.length > 0 && tab === "history" && (
+          {tab === "history" && history.length > 0 && (
             <Button onClick={clearHistory} className="mt-3 w-full h-9 rounded-(--r-ctl) bg-s3 text-[13px] text-mut pressable">清空观看历史</Button>
           )}
         </div>
