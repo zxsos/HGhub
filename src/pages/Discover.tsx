@@ -60,7 +60,7 @@ export function TopicsPage({ onBack, wide }: { onBack: () => void; wide: boolean
   return (
     <div className="ios-page absolute inset-0 bg-bg flex flex-col">
       <div className="shrink-0 bg-s1" style={{ paddingTop: "var(--sat, 0px)" }}>
-        <div className="px-3 pt-2 pb-3 flex items-center gap-2.5">
+        <div className="pt-2 pb-3 flex items-center gap-2.5">
           <Button aria-label="返回" onClick={onBack} className="w-10 h-10 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable"><IBack size={20} /></Button>
           <h1 className="text-[17px] font-bold text-on">专题</h1>
           <span className="text-[12px] text-mut">{items.length} 个专辑</span>
@@ -120,7 +120,7 @@ export function TopicPage({ slug, name, onBack, wide }: { slug: string; name: st
   return (
     <div className="ios-page absolute inset-0 bg-bg flex flex-col">
       <div className="shrink-0 bg-s1" style={{ paddingTop: "var(--sat, 0px)" }}>
-        <div className="px-3 pt-2 pb-3 flex items-center gap-2.5">
+        <div className="pt-2 pb-3 flex items-center gap-2.5">
           <Button aria-label="返回" onClick={onBack} className="w-10 h-10 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable"><IBack size={20} /></Button>
           <div className="flex-1 min-w-0">
             <h1 className="text-[16px] font-bold text-on truncate" title={topic?.title || name}>{topic?.title || name}</h1>
@@ -181,7 +181,7 @@ export function TagsPage({ onBack, wide }: { onBack: () => void; wide: boolean }
   return (
     <div className="ios-page absolute inset-0 bg-bg flex flex-col">
       <div className="shrink-0 bg-s1" style={{ paddingTop: "var(--sat, 0px)" }}>
-        <div className="px-3 pt-2 pb-3 flex items-center gap-2.5">
+        <div className="pt-2 pb-3 flex items-center gap-2.5">
           <Button aria-label="返回" onClick={onBack} className="w-10 h-10 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable"><IBack size={20} /></Button>
           <h1 className="text-[17px] font-bold text-on">标签</h1>
           <Button onClick={() => setSearching(true)} aria-label="搜索短剧" className="ml-auto w-9 h-9 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable"><ISearch size={19} /></Button>
@@ -282,7 +282,7 @@ export function TagPage({ tag, name, onBack, wide }: { tag: string; name: string
   return (
     <div className="ios-page absolute inset-0 bg-bg flex flex-col">
       <div className="shrink-0 bg-s1" style={{ paddingTop: "var(--sat, 0px)" }}>
-        <div className="px-3 pt-2 pb-3 flex items-center gap-2.5">
+        <div className="pt-2 pb-3 flex items-center gap-2.5">
           <Button aria-label="返回" onClick={onBack} className="w-10 h-10 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable"><IBack size={20} /></Button>
           <div className="flex-1 min-w-0">
             <h1 className="text-[16px] font-bold text-on truncate" title={name}>{name}</h1>

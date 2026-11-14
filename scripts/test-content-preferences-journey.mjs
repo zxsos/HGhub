@@ -44,7 +44,8 @@ try {
     // Use the actual app navigation, not a harness exposing preference setters.
     if (mobile) await nav().getByRole('button', { name: '我的', exact: true }).click();
     await page.getByRole('button', { name: '设置', exact: true }).click();
-    await page.getByRole('navigation', { name: '设置分组' }).getByRole('button', { name: '内容偏好', exact: true }).click();
+    if (await page.getByRole('button', { name: '内容偏好设置', exact: true }).getAttribute('aria-expanded') === 'false')
+      await page.getByRole('button', { name: '内容偏好设置', exact: true }).click();
     await page.getByRole('textbox', { name: '添加屏蔽标签', exact: true }).fill('惊悚');
     await page.getByRole('button', { name: '屏蔽标签', exact: true }).click();
     assert.deepEqual(await page.evaluate(key => JSON.parse(localStorage.getItem(key)).blockedTags, key), ['惊悚']);
@@ -91,7 +92,8 @@ try {
     await page.getByRole('heading', { name: '内容已屏蔽', exact: true }).waitFor();
     assert.equal(await calls(), afterOnce, 'Revealing cards must not authorize playback');
     await page.getByRole('button', { name: '管理屏蔽标签', exact: true }).click();
-    await page.getByRole('navigation', { name: '设置分组' }).getByRole('button', { name: '内容偏好', exact: true }).click();
+    if (await page.getByRole('button', { name: '内容偏好设置', exact: true }).getAttribute('aria-expanded') === 'false')
+      await page.getByRole('button', { name: '内容偏好设置', exact: true }).click();
     await page.getByRole('switch', { name: '暂停全部屏蔽', exact: true }).click();
     await page.getByRole('button', { name: '返回', exact: true }).click();
     await page.waitForFunction(previous => window.preferenceJourney.calls.filter(call => call.command === 'api_play').length > previous, afterOnce);

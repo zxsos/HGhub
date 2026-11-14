@@ -95,24 +95,24 @@ export default function Category({ wide, active }: { wide: boolean; active: bool
         {/* 排行榜入口：只在移动端显示（底部导航没有排行榜，桌面侧栏已有） */}
         {!wide && (
           <CollectionLink icon={<ITrophy size={18} />} title="排行榜" subtitle="热播榜 · 推荐榜 · 潜力榜"
-            onClick={() => push({ kind: "ranks" })} className="mx-4 mb-2.5 w-[calc(100%-2rem)]" />
+            onClick={() => push({ kind: "ranks" })} className="mb-2.5 w-full" />
         )}
 
         {/* 专题 + 标签入口 */}
-        <CollectionLinks className="ios-category-links mx-4 mb-5">
+        <CollectionLinks className="ios-category-links mb-5">
           <CollectionLink icon={<IGrid size={18} />} title="专题" subtitle="精选专辑合集"
             onClick={() => push({ kind: "topics" })} />
           <CollectionLink icon={<IGlobe size={18} />} title="标签" subtitle="按题材找片"
             onClick={() => push({ kind: "tags" })} />
         </CollectionLinks>
 
-        <p className="px-4 mb-3 text-[12px] text-mut">频道卡片可左右滑动浏览 · 点击“全部”查看完整频道</p>
+        <p className="mb-3 text-[12px] text-mut">频道卡片可左右滑动浏览 · 点击“全部”查看完整频道</p>
         {CHANNELS.map((c, ci) => {
           const list = rows[c.cate] || [];
           return (
             <section key={c.cate} aria-label={c.name} className="mb-5 a-rise" style={{ animationDelay: `${Math.min(ci * 50, 300)}ms` }}>
               <Button onClick={() => push({ kind: "channel", cate: c.cate, name: c.name })}
-                className="w-full flex items-center gap-2.5 px-4 mb-2.5 text-left pressable group">
+                className="w-full flex items-center gap-2.5 mb-2.5 text-left pressable group">
                 <span className="w-[36px] h-[36px] rounded-(--r-sm) tonal flex items-center justify-center shrink-0 text-primary">
                   <IGrid size={19} strokeWidth={1.9} />
                 </span>
@@ -124,7 +124,7 @@ export default function Category({ wide, active }: { wide: boolean; active: bool
                   全部<IChevR size={14} />
                 </span>
               </Button>
-              <FilteredContent items={list} scopeKey={c.cate} className="mx-4">{visible => <div className="scroll-x flex gap-2.5 px-4 snap-x" role="group" aria-label={`${c.name}影片预览`}>
+              <FilteredContent items={list} scopeKey={c.cate}>{visible => <div className="scroll-x flex gap-2.5 snap-x" role="group" aria-label={`${c.name}影片预览`}>
                 {visible.map((v) => (
                   <RowCard key={v.id} v={v} onOpen={() => push({ kind: "feed", videoIds: list.map((x) => x.id), index: list.findIndex((x) => x.id === v.id), title: c.name })} />
                 ))}
@@ -137,7 +137,7 @@ export default function Category({ wide, active }: { wide: boolean; active: bool
         {/* 吃瓜 */}
         <section aria-label="吃瓜" className="mb-5 a-rise">
           <Button onClick={() => push({ kind: "posts" })}
-            className="w-full flex items-center gap-2.5 px-4 mb-2.5 text-left pressable group">
+            className="w-full flex items-center gap-2.5 mb-2.5 text-left pressable group">
             <span className="w-[36px] h-[36px] rounded-(--r-sm) tonal flex items-center justify-center shrink-0 text-primary">
               <IGrid size={19} strokeWidth={1.9} />
             </span>
@@ -149,7 +149,7 @@ export default function Category({ wide, active }: { wide: boolean; active: bool
               全部<IChevR size={14} />
             </span>
           </Button>
-          <FilteredContent items={posts} scopeKey="posts" className="mx-4">{visible => <div className="scroll-x flex gap-2.5 px-4 snap-x" role="group" aria-label="吃瓜内容预览">
+          <FilteredContent items={posts} scopeKey="posts">{visible => <div className="scroll-x flex gap-2.5 snap-x" role="group" aria-label="吃瓜内容预览">
             {visible.map((post) => (
               <div key={post.id} className="ios-row-card"><MediaCard title={post.title} cover={post.cover}
                 subtitle={`${fmt(post.hot)} 次浏览`} onOpen={() => push({ kind: "post", id: post.id })} /></div>
@@ -158,7 +158,7 @@ export default function Category({ wide, active }: { wide: boolean; active: bool
           </div>}</FilteredContent>
         </section>
 
-        <div className="px-4 text-center text-[12px] text-dim pt-1">— 已展示全部频道 —</div>
+        <div className="text-center text-[12px] text-dim pt-1">— 已展示全部频道 —</div>
       </div>
       {wide && <div />}
     </div>

@@ -323,6 +323,10 @@ try {
       check("visible form labels, login errors, focus trap, Escape, and overlay back");
 
       await page.getByRole("button", { name: "设置", exact: true }).click();
+      for (const group of ["网络", "本地数据"]) {
+        const trigger = page.getByRole("button", { name: `${group}设置`, exact: true });
+        if (await trigger.getAttribute("aria-expanded") !== "true") await trigger.click();
+      }
       const security = page.getByRole("switch", { name: "严格安全模式", exact: true });
       const appearance = page.getByRole("group", { name: "外观模式", exact: true });
       await security.waitFor();

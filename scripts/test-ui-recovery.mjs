@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const suites = [
   ['settings', ['scripts/test-settings-ux.mjs']],
+  ['settings-disclosure', ['scripts/test-settings-disclosure.mjs']],
+  ['visual-alignment', ['scripts/test-visual-alignment.mjs']],
   ['search', ['scripts/test-search-recovery.mjs']],
   ['discovery', ['scripts/test-discover-recovery.mjs']],
   ['posts', ['scripts/test-post-reading.mjs']],

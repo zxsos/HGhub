@@ -21,10 +21,11 @@ try {
  await page.route('**/*',r=>new URL(r.request().url()).origin===new URL(origin).origin?r.continue():r.abort());
  const open=()=>page.goto(`${origin}tests/content-preferences-core.html`);
  const ready=()=>page.waitForFunction(()=>!!window.preferenceFixture);
+ const expandPreferences=async()=>{const trigger=page.getByRole('button',{name:'内容偏好设置',exact:true});if(await trigger.getAttribute('aria-expanded')==='false')await trigger.click();await trigger.scrollIntoViewIfNeeded();};
  const test=async(name,fn)=>{try{await fn();report.passed.push(name);}catch(e){report.failed.push({name,error:String(e.stack||e)});}};
  await open();await ready();
  await test('canonical-content-preferences-storage-key',async()=>{assert.equal(await page.evaluate(()=>window.preferenceFixture.key),'hghubx_content_preferences_v1');});
- await test('settings-section-entry',async()=>{await page.getByRole('navigation',{name:'设置分组'}).getByRole('button',{name:'内容偏好',exact:true}).click();await page.getByRole('heading',{name:'内容偏好',exact:true}).waitFor();});
+ await test('settings-section-entry',async()=>{await expandPreferences();await page.getByRole('heading',{name:'内容偏好',exact:true}).waitFor();});
  await test('empty-exact-normalized-rules',async()=>{
   const result=await page.evaluate(()=>{const f=window.preferenceFixture;const p={blockedTags:[' Horror ','科 幻'],paused:false,hideUntagged:false};return [f.normalizeTag('  科\t  幻 '),f.reason(['horror'],p),f.reason(['horror comedy'],p),f.reason([],p),f.reason(undefined,p),f.reason(['科  幻'],p),f.reason(['Horror'],{...p,paused:true}),f.reason([],{...p,hideUntagged:true}),f.reason([' '],{...p,hideUntagged:true})];});
   assert.deepEqual(result,['科 幻','屏蔽标签： Horror ',null,null,null,'屏蔽标签：科 幻',null,'未提供标签','未提供标签']);
@@ -61,7 +62,7 @@ try {
   await page.evaluate(()=>window.preferenceFixture.clearBlockedTags());
  });
  await test('settings-add-duplicate-search-and-confirm-removal',async()=>{
-  await page.getByRole('navigation',{name:'设置分组'}).getByRole('button',{name:'内容偏好',exact:true}).click();
+  await expandPreferences();
   const input=page.getByRole('textbox',{name:'添加屏蔽标签',exact:true});await input.fill('  Suspense  ');await page.getByRole('button',{name:'屏蔽标签',exact:true}).click();
   await page.getByRole('button',{name:'取消屏蔽 Suspense',exact:true}).waitFor();await input.fill('suspense');await page.getByRole('button',{name:'屏蔽标签',exact:true}).click();await page.getByRole('alert').filter({hasText:'已在屏蔽列表'}).waitFor();
   await input.fill('校园');await page.getByRole('button',{name:'屏蔽标签',exact:true}).click();
@@ -83,7 +84,7 @@ try {
  await test('corrupt-storage-defaults',async()=>{await page.evaluate(()=>localStorage.setItem(window.preferenceFixture.key,'{invalid'));await page.reload();await ready();assert.deepEqual(await page.evaluate(()=>window.preferenceFixture.preferences),{blockedTags:[],paused:false,hideUntagged:false});});
  await test('responsive-settings-long-tag',async()=>{
   await page.evaluate(()=>window.preferenceFixture.blockTags(['很长的标签'.repeat(10),'W'.repeat(64)]));
-  for(const [width,height] of [[320,694],[375,812],[812,375],[1280,900]]) {await page.setViewportSize({width,height});await page.getByRole('navigation',{name:'设置分组'}).getByRole('button',{name:'内容偏好',exact:true}).click();assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));assert(await page.locator('#settings-内容偏好').evaluate(el=>el.getBoundingClientRect().width<=720));await page.screenshot({path:fileURLToPath(new URL(`preferences-${width}.png`,output)),animations:'disabled'});}
+  for(const [width,height] of [[320,694],[375,812],[812,375],[1280,900]]) {await page.setViewportSize({width,height});await expandPreferences();assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));assert(await page.locator('#settings-内容偏好').evaluate(el=>el.getBoundingClientRect().width<=720));await page.screenshot({path:fileURLToPath(new URL(`preferences-${width}.png`,output)),animations:'disabled'});}
  });
  await test('keyboard-submit-and-escape-keeps-tag',async()=>{
   const input=page.getByRole('textbox',{name:'添加屏蔽标签',exact:true});await input.fill('键盘操作');await input.press('Enter');
@@ -94,7 +95,7 @@ try {
  await test('dark-settings-and-large-text-layout',async()=>{
   await page.setViewportSize({width:375,height:812});await page.getByRole('button',{name:'深色',exact:true}).click();
   await page.waitForFunction(()=>document.documentElement.dataset.theme==='dark');
-  await page.getByRole('navigation',{name:'设置分组'}).getByRole('button',{name:'内容偏好',exact:true}).click();
+  await expandPreferences();
   await page.screenshot({path:fileURLToPath(new URL('preferences-dark.png',output)),animations:'disabled'});
   await page.addStyleTag({content:'#settings-内容偏好 :is(h3,p,label,span,button,input,summary) { font-size: 24px !important; }'});
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
