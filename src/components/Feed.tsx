@@ -89,7 +89,10 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   const wake = useCallback(() => {
     setIdle(false);
     window.clearTimeout(idleTimer.current);
-    idleTimer.current = window.setTimeout(() => setIdle(true), 2800);
+    idleTimer.current = window.setTimeout(() => {
+      // Keyboard users must keep seeing the focused control/menu.
+      if (!boxRef.current?.parentElement?.contains(document.activeElement) || !document.activeElement?.closest(".desktop-controls")) setIdle(true);
+    }, 2800);
   }, []);
   useEffect(() => {
     if (!isDesktop) return undefined;
@@ -650,6 +653,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
 
   useEffect(() => {
     if (!active || controlsLocked) {
+      if (!active) setPanel(null);
       onUp(true);
       if (lastTapRef.current.timer) window.clearTimeout(lastTapRef.current.timer);
       lastTapRef.current.timer = null;
@@ -874,6 +878,9 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     <div
       className={`hg-player-ui ${rotated ? "fs-landscape" : (!isDesktop && fs ? "fs-immersive" : "absolute inset-0")} overflow-hidden bg-black player-root ${controlsLocked ? "is-locked" : ""} ${isDesktop ? "player-surface" : ""} ${theater ? "is-theater" : ""} ${isDesktop && idle ? "is-idle" : ""}`}
       data-clean={clean}
+      inert={!active || undefined}
+      aria-hidden={!active || undefined}
+      onFocusCapture={() => { if (active && isDesktop) wake(); }}
       onPointerMove={() => { if (isDesktop || fs) wake(); }}
       onPointerDown={() => { if (!isDesktop && fs) wake(); }}>
       <div className="absolute inset-0" inert={controlsLocked}>
