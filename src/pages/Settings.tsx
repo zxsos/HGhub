@@ -1,5 +1,5 @@
 import { Button, SegmentedControl, Surface, TextArea } from "../components/ios/controls";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api, APP_VERSION, hostOf, logLine, platform, type UpdateInfo } from "../api";
 import { useStore } from "../store";
 import { Modal, Toggle } from "../components/ui";
@@ -9,13 +9,14 @@ import { autoLineEnabled, setAutoLine } from "../autoLine";
 import { copyPlaybackLog, initPlaybackLog, setPlaybackLog, tracePlayback, usePlaybackLog } from "../playbackDiagnostics";
 import { formatNetDiag, shortVerdict } from "../netDiagReport";
 import { copyText } from "../clipboard";
+import { Loader } from "../components/ios/effects";
 import { IBack, IBoltF, IBroom, IChevR, IHeart, IInfo, ILink, ILockF, IMoon, IRefresh, ISun, IVolMute } from "../icons";
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
-  return <>
-    <div className="ios-section-label">{title}</div>
+  return <section id={`settings-${title}`} aria-labelledby={`settings-title-${title}`} tabIndex={-1} className="scroll-mt-3">
+    <h2 id={`settings-title-${title}`} className="ios-section-label">{title}</h2>
     <Surface className="ios-setting-group">{children}</Surface>
-  </>;
+  </section>;
 }
 
 /* 独立设置页：线路 / 外观 / 播放 / 本地数据 / 清理缓存 / 网络诊断 / 关于
@@ -27,6 +28,9 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
   const [lineOpen, setLineOpen] = useState(false);
   const [lineBase, setLineBase] = useState("");
   const [autoLineOn, setAutoLineOn] = useState(autoLineEnabled);
+  const clearBusy = useRef(false);
+  const [clearError, setClearError] = useState("");
+  const [lineError, setLineError] = useState("");
   const [clearing, setClearing] = useState(false);
   const [checking, setChecking] = useState(false);
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
@@ -40,7 +44,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
 
   useEffect(() => { void initPlaybackLog(); }, []);
 
-  const readLine = () => { api.lineState().then((state) => setLineBase(state.base)).catch(() => {}); };
+  const readLine = () => { api.lineState().then((state) => { setLineBase(state.base); setLineError(""); }).catch(() => setLineError("线路读取失败，点击重新选择")); };
   useEffect(() => {
     const sync = () => { readLine(); setAutoLineOn(autoLineEnabled()); };
     sync();
@@ -53,6 +57,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
   }, []);
 
   const checkUpdate = async () => {
+    if (checking) return;
     setChecking(true);
     try {
       const info = await api.checkUpdate();
@@ -91,6 +96,13 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
         <p className="text-[13px] text-mut mt-2">让 HGhubX 更合你的习惯</p>
       </div>
 
+      <nav aria-label="设置分组" className="shrink-0 scroll-x flex gap-2 pb-3">
+        {["外观", "播放", "本地数据", "网络", "播放诊断", "其他"].map(title => <Button key={title} className="ios-filter-pill shrink-0" onClick={() => {
+          const section = document.getElementById(`settings-${title}`);
+          section?.scrollIntoView({ block: "start", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
+          section?.focus({ preventScroll: true });
+        }}>{title}</Button>)}
+      </nav>
       <div className="ios-page-body flex-1 scroll-y px-4 pt-1 pb-10">
         <div className={wide ? "max-w-[720px] mx-auto" : ""}>
           <Section title="外观">
@@ -138,11 +150,11 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
                 <div className="text-[12px] text-mut">{favs.length} 部收藏 · {history.length} 条观看记录</div>
               </div>
             </div>
-            <Button onClick={() => setClearOpen(true)} className="w-full flex items-center gap-3 px-3.5 py-3 text-left pressable">
+            <Button onClick={() => { setClearError(""); setClearOpen(true); }} className="w-full flex items-center gap-3 px-3.5 py-3 text-left pressable">
               <span className="ios-setting-icon"><IBroom size={16} /></span>
               <div className="flex-1">
                 <div className="text-[14px] text-on">清理缓存</div>
-                <div className="text-[12px] text-mut">封面 / 播放缓存与本地记录</div>
+                <div className="text-[12px] text-mut">仅清除封面和播放列表缓存</div>
               </div>
               <IChevR size={15} className="text-mut" />
             </Button>
@@ -154,7 +166,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
               <span className="ios-setting-icon"><IBoltF size={16} /></span>
               <div className="flex-1 min-w-0">
                 <div className="text-[14px] text-on">播放源</div>
-                <div className="text-[12px] text-mut truncate">{lineBase ? hostOf(lineBase) : "读取中…"}</div>
+                <div className="text-[12px] text-mut truncate">{lineError || (lineBase ? hostOf(lineBase) : "读取中…")}</div>
               </div>
               <IChevR size={15} className="text-mut" />
             </Button>
@@ -251,15 +263,16 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
               <span className="ios-setting-icon"><ILink size={16} /></span>
               <div className="flex-1 min-w-0">
                 <div className="text-[14px] text-on">{copyingLog ? "正在复制…" : "复制播放诊断日志"}</div>
-                <div className="text-[12px] text-mut break-all">含版本、平台、当前线路、播放失败原因，粘贴即完整{playbackLog.path ? ` · ${playbackLog.path}` : ""}</div>
+                <div className="text-[12px] text-mut">含版本、平台、当前线路和播放失败原因</div>
               </div>
               <IChevR size={15} className="text-mut" />
             </Button>
           </Section>
 
+          {playbackLog.path && <details className="text-[12px] text-mut mb-4"><summary className="cursor-pointer py-3">查看日志保存位置</summary><p className="break-all select-text">{playbackLog.path}</p></details>}
           <Section title="其他">
             <Button onClick={checkUpdate} disabled={checking} className="w-full flex items-center gap-3 px-3.5 py-3 text-left pressable disabled:opacity-60">
-              <span className="ios-setting-icon"><IRefresh size={16} /></span>
+              <span className="ios-setting-icon">{checking ? <Loader label="正在检查更新" className="size-4" /> : <IRefresh size={16} />}</span>
               <div className="flex-1">
                 <div className="text-[14px] text-on">检查更新</div>
                 <div className="text-[12px] text-mut">{checking ? "检查中…" : `当前 v${APP_VERSION} · 对比 GitHub Release`}</div>
@@ -282,7 +295,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
 
       <LinePicker open={lineOpen} onClose={() => { setLineOpen(false); readLine(); }} />
 
-      <Modal open={diagReport !== null} onClose={() => setDiagReport(null)} width={520}>
+      <Modal label="网络诊断报告" open={diagReport !== null} onClose={() => setDiagReport(null)} width={520}>
         <div className="p-5">
           <h2 className="text-[15px] font-bold text-on">网络诊断报告</h2>
           <p className="text-[13px] text-mut mt-2">诊断已完成，自动复制未成功。可以重试复制，或在下方选择报告文字。</p>
@@ -301,7 +314,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
         </div>
       </Modal>
 
-      <Modal open={about} onClose={() => setAbout(false)} width={392}>
+      <Modal label="关于 HGhubX" open={about} onClose={() => setAbout(false)} width={392}>
         <div className="p-5">
           <div className="flex items-center gap-3">
             <span className="w-11 h-11 rounded-(--r-sm) brand-grad glow-neon flex items-center justify-center text-on-primary text-[17px] font-black">H</span>
@@ -322,11 +335,11 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
           </Surface>
 
           <div className="mt-4 divide-y divide-s3">
-            <Button onClick={() => { api.openUrl("https://github.com/zxsos/HGhubX").catch(() => { copyText("https://github.com/zxsos/HGhubX").then(() => toast("仓库地址已复制", "ok")).catch(() => {}); }); }}
+            <Button aria-label="打开项目仓库" onClick={() => { api.openUrl("https://github.com/zxsos/HGhubX").catch(() => { copyText("https://github.com/zxsos/HGhubX").then(() => toast("仓库地址已复制", "ok")).catch(() => {}); }); }}
               className="w-full flex items-center gap-2 py-2.5 text-left pressable">
               <ILink size={15} className="text-mut" />
               <span className="text-[13px] text-on/85">github.com/zxsos/HGhubX</span>
-              <span className="ml-auto text-[12px] text-primary">复制</span>
+              <span className="ml-auto text-[12px] text-primary">打开</span>
             </Button>
             <Button onClick={() => { copyText("https://huangguoai.com").then(() => toast("站点地址已复制", "ok")).catch(() => {}); }}
               className="w-full flex items-center gap-2 py-2.5 text-left pressable">
@@ -345,20 +358,26 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
         </div>
       </Modal>
 
-      <Modal open={clearOpen} onClose={() => setClearOpen(false)} width={330}>
+      <Modal label="清理缓存" open={clearOpen} onClose={() => { if (!clearBusy.current) setClearOpen(false); }} width={330}>
         <div className="p-5">
           <div className="text-[15px] font-bold text-on">清理缓存</div>
           <p className="text-[13px] text-mut leading-relaxed mt-2">
             只清除封面与播放列表缓存（解密图 / m3u8）。收藏、观看记录、搜索历史与登录状态都会保留。
           </p>
+          {clearError && <p role="alert" className="text-[13px] text-danger mt-3">{clearError}</p>}
           <div className="flex gap-2 mt-5">
-            <Button onClick={() => setClearOpen(false)} className="flex-1 h-9 rounded-(--r-ctl) bg-s3 text-[14px] text-on/80 pressable">取消</Button>
+            <Button disabled={clearing} onClick={() => setClearOpen(false)} className="flex-1 h-9 rounded-(--r-ctl) bg-s3 text-[14px] text-on/80 pressable">取消</Button>
             <Button disabled={clearing} onClick={async () => {
-              setClearing(true);
-              try { await api.clearCache(); } catch { /* 忽略 */ }
-              setClearing(false);
-              setClearOpen(false);
-              toast("缓存已清理", "ok");
+              if (clearBusy.current) return;
+              clearBusy.current = true;
+              setClearing(true); setClearError("");
+              try {
+                await api.clearCache();
+                setClearOpen(false);
+                toast("缓存已清理", "ok");
+              } catch (error) {
+                setClearError(error instanceof Error ? error.message : String(error || "清理失败，请重试"));
+              } finally { clearBusy.current = false; setClearing(false); }
             }} className="flex-1 h-9 rounded-(--r-ctl) bg-primary text-[14px] font-semibold text-on-primary pressable disabled:opacity-60">
               {clearing ? "清理中…" : "确定清理"}
             </Button>
@@ -366,7 +385,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
         </div>
       </Modal>
 
-      <Modal open={!!update?.has_update} onClose={() => setUpdate(null)} width={392}>
+      <Modal label="发现新版本" open={!!update?.has_update} onClose={() => setUpdate(null)} width={392}>
         <div className="p-5">
           <div className="text-[16px] font-bold text-on">发现新版本</div>
           <p className="text-[12px] text-mut mt-1.5">
@@ -384,7 +403,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
               {updating || "前往下载"}
             </Button>
           </div>
-          <div className="text-[12px] text-dim mt-2.5 break-all">{update?.url}</div>
+          <details className="text-[12px] text-mut mt-2.5"><summary className="py-3 cursor-pointer">下载地址</summary><p className="break-all select-text">{update?.url}</p></details>
         </div>
       </Modal>
     </div>
