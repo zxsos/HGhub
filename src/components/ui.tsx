@@ -23,10 +23,12 @@ export function Avatar({ hue = 250, icon, name, size = 40, ring = false, classNa
 }
 
 /* ——— 开关 ——— */
-export function Toggle({ on, onChange, label, disabled = false }: { on: boolean; onChange: (b: boolean) => void; label?: string; disabled?: boolean }) {
+export function Toggle({ on, onChange, label, disabled = false, desktop = false }: {
+  on: boolean; onChange: (b: boolean) => void; label?: string; disabled?: boolean; desktop?: boolean;
+}) {
   return (
     <Button disabled={disabled} onClick={() => onChange(!on)} role="switch" aria-checked={on} aria-label={label}
-      className="ios-switch" data-platform={platform} data-state={on ? "on" : "off"}>
+      className="ios-switch" data-platform={desktop ? "desktop" : platform} data-state={on ? "on" : "off"}>
       <span className="ios-switch-track" aria-hidden="true">
         <span className="ios-switch-thumb">
           <ICheck size={14} className="ios-switch-mark is-on" />
@@ -153,13 +155,20 @@ export function Img({ src, alt = "", className = "", eager = false, raw = false 
 }) {
   const [ok, setOk] = useState(false);
   const [err, setErr] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const url = raw ? src : cover(src);
-  useEffect(() => { setOk(false); setErr(false); }, [url]);
+  /* 封面走本地解密代理，网络抖动会偶发失败：同地址重试两次再落到占位。
+     代理入口只读 `u`，多余查询参数会被忽略，用它做重试的缓存戳。 */
+  const retryUrl = !url || raw || attempt === 0 ? url : `${url}${url.includes("?") ? "&" : "?"}r=${attempt}`;
+  /* 换图（含列表滚动复用同组件）时重置重试计数，避免上一张图的失败次数污染新图。 */
+  useEffect(() => { setOk(false); setErr(false); setAttempt(0); }, [url]);
   return (
     <div className={`ios-image absolute inset-0 overflow-hidden ${className}`} data-ui="image-frame">
       {!ok && !err && <div className="absolute inset-0 shimmer" />}
       {err && <div className="ios-image-error" role="img" aria-label={alt || "封面暂不可用"}>HG</div>}
-      <Image src={url} alt={alt} loading={eager ? "eager" : "lazy"} onLoad={() => setOk(true)} onError={() => setErr(true)}
+      <Image src={retryUrl} alt={alt} loading={eager ? "eager" : "lazy"}
+        onLoad={() => { setOk(true); setErr(false); }}
+        onError={() => { if (raw) { setErr(true); return; } if (attempt < 2) setAttempt(attempt + 1); else setErr(true); }}
         className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 ${ok ? "opacity-100" : "opacity-0"}`} draggable={false} />
     </div>
   );

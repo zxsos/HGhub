@@ -5,6 +5,7 @@ import { api, fmt, isMobile } from "../api";
 import type { HotSearchVideo, Post, RankItem, VideoCard } from "../types";
 import { useStore } from "../store";
 import { MediaCard, Masonry, RankRow } from "../components/cards";
+import { FilteredContent } from "../components/FilteredContent";
 import { Empty } from "../components/ui";
 import { useSearchResults } from "../useSearchResults";
 import { IBack, IChevR, IClose, IFireF, IPlayF, IRefresh, ISearch, ITrophy } from "../icons";
@@ -77,7 +78,7 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
       <div className="ios-page-heading shrink-0"><h1 className="ios-page-title">搜索</h1></div>
       {/* 搜索栏 */}
       <div className="shrink-0 px-4 pb-3 flex items-center gap-2.5" >
-        <Form className="ios-search-form flex-1 flex items-center gap-2"
+        <Form className="ios-search-form flex-1 min-w-0 flex items-center gap-2"
           onSubmit={(e) => { e.preventDefault(); submit(q); }}>
           <ISearch size={17} className="text-mut shrink-0" />
           <Input aria-label="搜索短剧、帖子、题材…" ref={inputRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜索短剧、帖子、题材…"
@@ -177,13 +178,13 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
             <section aria-label="搜索结果" aria-busy={loading}>
               {result && count > 0 ? <>
                 {result.kind === "video" ? (
-                  <Masonry videos={items} wide={wide} onOpen={(v) => push({ kind: "feed", videoIds: items.map((x) => x.id), index: items.findIndex((x) => x.id === v.id), title: `搜索 · ${result.keyword}` })} />
+                  <Masonry videos={items} scopeKey={JSON.stringify([submitted, tab, result.keyword, result.kind])} wide={wide} onOpen={(v) => push({ kind: "feed", videoIds: items.map((x) => x.id), index: items.findIndex((x) => x.id === v.id), title: `搜索 · ${result.keyword}` })} />
                 ) : (
-                  <div className={`ios-media-grid ${wide ? "is-wide" : ""}`}>
-                    {posts.map((post) => (
+                  <FilteredContent items={posts} scopeKey={JSON.stringify([submitted, tab, result.keyword, result.kind])}>{visible => <div className={`ios-media-grid ${wide ? "is-wide" : ""}`}>
+                    {visible.map((post) => (
                       <MediaCard key={post.id} title={post.title} cover={post.cover} subtitle={`${fmt(post.hot)} 次浏览`} onOpen={() => push({ kind: "post", id: post.id })} />
                     ))}
-                  </div>
+                  </div>}</FilteredContent>
                 )}
                 <div className="flex justify-center py-4">
                   {loading ? <Loader label="搜索结果更新中" className="w-6 h-6 spinner" />
@@ -253,9 +254,9 @@ export function RankPage({ onBack, wide }: { onBack: () => void; wide: boolean }
     <div className="ios-page absolute inset-0 bg-bg flex flex-col">
       <div className="shrink-0 relative overflow-hidden bg-s1" style={{ paddingTop: "var(--sat, 0px)" }}>
         <div className="absolute inset-0 pointer-events-none" style={{ background: "radial-gradient(90% 120% at 100% 0%, var(--p-pc) 0%, transparent 60%)", opacity: 0.32 }} />
-        <div className="relative px-3 pt-2 pb-4">
+        <div className="relative pt-2 pb-4">
           <Button aria-label="返回" onClick={onBack} className="w-10 h-10 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable"><IBack size={20} /></Button>
-          <div className="px-2 mt-1 flex items-end justify-between">
+          <div className="mt-1 flex flex-wrap gap-2 items-end justify-between">
             <div>
               <div className="flex items-center gap-2">
                 <span className="w-9 h-9 rounded-(--r-sm) bg-pc text-on-pc flex items-center justify-center"><ITrophy size={20} /></span>
@@ -283,10 +284,10 @@ export function RankPage({ onBack, wide }: { onBack: () => void; wide: boolean }
         <section aria-label={meta.label} aria-busy={loading}>
           {items.length > 0 ? <>
             {loading && <p role="status" className="text-[12px] text-mut mb-2">正在刷新，当前显示上次榜单…</p>}
-            {items.map((it) => (
+            <FilteredContent items={items} scopeKey={tab}>{visible => visible.map((it) => (
               <RankRow key={`${it.video_id}-${it.rank}`} item={it} metricMax={max}
                 onOpen={() => push({ kind: "feed", videoIds: items.map((x) => x.video_id), index: items.findIndex((x) => x.video_id === it.video_id), title: meta.label })} />
-            ))}
+            ))}</FilteredContent>
           </> : loading ? (
             <div className="flex justify-center py-12"><Loader label="正在加载榜单" className="w-8 h-8 spinner" /></div>
           ) : !err && (

@@ -323,6 +323,10 @@ try {
       check("visible form labels, login errors, focus trap, Escape, and overlay back");
 
       await page.getByRole("button", { name: "设置", exact: true }).click();
+      for (const group of ["外观", "播放", "网络", "本地数据"]) {
+        const trigger = page.getByRole("button", { name: `${group}设置`, exact: true });
+        if (await trigger.getAttribute("aria-expanded") !== "true") await trigger.click();
+      }
       const security = page.getByRole("switch", { name: "严格安全模式", exact: true });
       const appearance = page.getByRole("group", { name: "外观模式", exact: true });
       await security.waitFor();
@@ -376,32 +380,24 @@ try {
             androidShell: !!shell };
         });
         result.switches.push({ label: await item.getAttribute("aria-label"), width: target.width, height: target.height, visualBounds: bounds, ...visual });
-        assert(target.width >= 44 && target.height >= (test.android ? 48 : 44), "Switch touch target meets the platform minimum");
+        assert(target.width >= 44 && target.height >= 44, "Switch touch target meets the platform minimum");
         assert(["true", "false"].includes(await item.getAttribute("aria-checked")), "Switch exposes its state");
         const off = await item.evaluate(el => {
           const rail = el.querySelector(".ios-switch-track").getBoundingClientRect();
           const thumb = el.querySelector(".ios-switch-thumb").getBoundingClientRect();
           return { left: thumb.left - rail.left, right: rail.right - thumb.right };
         });
+        assert.equal(visual.platform, "desktop", "Settings switches align with the desktop capsule style");
+        assert.equal(visual.trackRadius, "999px", "Settings switch keeps the capsule track");
+        assert.equal(visual.thumbRadius, "50%", "Settings switch thumb is circular");
         if (test.android) {
-          assert.equal(visual.platform, "android", "Android selects its platform switch variant");
-          assert.equal(visual.trackWidth, "52px", "Android uses the compact Material switch track");
-          assert.equal(visual.trackHeight, "18px", "Android uses a slim track");
-          assert.equal(visual.trackRadius, "6px", "Android uses a square-edged track rather than the iOS capsule");
-          assert.equal(visual.trackBackground, "none", "Android track has a solid material fill");
-          assert.equal(visual.thumbRadius, "50%", "Android thumb is circular");
-          assert.equal(visual.thumbBackground, "none", "Android thumb uses a solid surface");
           assert.equal(visual.androidShell, true, "Android fixture runs in the Android app shell");
           assert.notEqual(visual.activeIndicator, "rgba(0, 0, 0, 0)", "Android active navigation has a visible selection surface");
           assert.notEqual(visual.activeTabColor, "rgb(255, 255, 255)", "Android active navigation uses the selected ink color");
-        } else if (test.mobile) {
-          assert.equal(visual.platform, "ios", "iOS keeps its platform switch variant");
-          assert.equal(visual.trackRadius, "999px", "iOS keeps its capsule track");
-          assert.equal(visual.thumbRadius, "50%", "iOS keeps its circular thumb");
         }
         const initiallyOn = await item.getAttribute("aria-checked") === "true";
-        const expectedLeft = initiallyOn ? (test.android ? 25 : 27) : (test.android ? 0 : 3);
-        const expectedRight = initiallyOn ? (test.android ? 1 : 3) : (test.android ? 26 : 27);
+        const expectedLeft = initiallyOn ? 27 : 3;
+        const expectedRight = initiallyOn ? 3 : 27;
         assert(Math.abs(off.left - expectedLeft) < 1.1, `${visual.platform} switch thumb reaches the correct left/right endpoint`);
         assert(Math.abs(off.right - expectedRight) < 1.1, `${visual.platform} switch thumb clears the correct track edge`);
         const wasOn = await item.getAttribute("aria-checked") === "true";
@@ -414,8 +410,8 @@ try {
           return { left: thumb.left - rail.left, right: rail.right - thumb.right };
         });
         const turnedOn = targetState;
-        const movedLeft = turnedOn ? (test.android ? 25 : 27) : (test.android ? 0 : 3);
-        const movedRight = turnedOn ? (test.android ? 1 : 3) : (test.android ? 26 : 27);
+        const movedLeft = turnedOn ? 27 : 3;
+        const movedRight = turnedOn ? 3 : 27;
         assert(Math.abs(moved.left - movedLeft) < 1.1 && Math.abs(moved.right - movedRight) < 1.1,
           `${visual.platform} switch reaches both travel endpoints after activation`);
         const actualState = await item.getAttribute("aria-checked") === "true";
@@ -429,7 +425,7 @@ try {
         return { left: thumb.left - rail.left, right: rail.right - thumb.right };
       });
       const strictState = await security.getAttribute("aria-checked") === "true";
-      assert.equal(switchTravel.left, strictState ? (test.android ? 25 : 27) : (test.android ? 0 : 3), "Security switch thumb matches its state");
+      assert.equal(switchTravel.left, strictState ? 27 : 3, "Security switch thumb matches its state");
       const androidShell = page.locator(".plat-android").first();
       const material = await page.locator(".ios-setting-group").first().evaluate(el => {
         const root = getComputedStyle(document.documentElement);

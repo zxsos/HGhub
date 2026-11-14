@@ -96,6 +96,8 @@ try {
     }, { seed, MAIN, MIRROR });
     await page.goto(`${origin}tests/line-selection.html`);
     await page.waitForFunction(() => window.lineSelectionSnapshot?.ready);
+    const networkTrigger = page.getByRole("button", { name: "网络设置", exact: true });
+    if (await networkTrigger.getAttribute("aria-expanded") !== "true") await networkTrigger.click();
     return { context, page };
   }
 
