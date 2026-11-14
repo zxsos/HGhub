@@ -81,6 +81,76 @@ try {
       await p.getByText("未登录", { exact: true }).waitFor();
     });
   }
+  if (group === "user") {
+    await test("following-auth-gate", "following-guest", async p => {
+      await p.getByText("登录后查看关注流", { exact: true }).waitFor();
+      await p.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      assert.equal(await p.evaluate(() => window.accountRecoveryFixture.calls.filter(c => c.cmd === "api_following").length), 0, "Guest must not fetch the authenticated feed");
+      await p.evaluate(() => window.accountRecoveryFixture.login());
+      await p.waitForFunction(() => document.querySelectorAll(".ios-poster").length === 20);
+      await p.getByText("已加载 20 / 40 部", { exact: true }).waitFor();
+    });
+    await test("following-pagination-retry", "following-paging", async p => {
+      await p.waitForFunction(() => document.querySelectorAll(".ios-poster").length === 20);
+      await p.evaluate(() => window.accountRecoveryFixture.faults.add("api_following"));
+      await p.locator(".scroll-y").first().evaluate(el => { el.scrollTop = el.scrollHeight; });
+      await p.getByText("加载更多失败", { exact: true }).waitFor();
+      assert.equal(await p.locator(".ios-poster").count(), 20);
+      await p.evaluate(() => window.accountRecoveryFixture.faults.clear());
+      await p.getByRole("button", { name: "重试", exact: true }).click();
+      await p.waitForFunction(() => document.querySelectorAll(".ios-poster").length === 40);
+      await p.getByText("已加载 40 / 40 部", { exact: true }).waitFor();
+    });
+    await test("user-info-retry", "user-errors", async p => {
+      await p.getByText("资料信息未完整加载", { exact: true }).waitFor();
+      assert.equal(await p.locator(".ios-poster").count(), 20);
+      await p.evaluate(() => window.accountRecoveryFixture.faults.clear());
+      await p.getByRole("button", { name: "重试资料", exact: true }).click();
+      await p.getByRole("heading", { name: "作者 7", exact: true }).waitFor();
+      await p.getByRole("button", { name: "+ 关注", exact: true }).waitFor();
+      assert.equal(await p.getByText("资料信息未完整加载", { exact: true }).count(), 0);
+      await p.getByText("作者简介", { exact: true }).click();
+    });
+    await test("follow-confirmed-state", "user-follow", async p => {
+      await p.getByRole("button", { name: "+ 关注", exact: true }).waitFor();
+      await p.evaluate(() => window.accountRecoveryFixture.held.add("api_follow"));
+      await p.getByRole("button", { name: "+ 关注", exact: true }).evaluate(el => { el.click(); el.click(); });
+      assert.equal(await p.evaluate(() => window.accountRecoveryFixture.calls.filter(c => c.cmd === "api_follow").length), 1);
+      assert.deepEqual(await p.evaluate(() => window.accountRecoveryFixture.state.follows), [], "Do not persist unconfirmed follow");
+      assert(await p.getByRole("button", { name: "处理中…", exact: true }).isDisabled());
+      await p.evaluate(() => window.accountRecoveryFixture.settle("api_follow", false));
+      await p.getByRole("button", { name: "+ 关注", exact: true }).waitFor();
+      await p.getByRole("button", { name: "+ 关注", exact: true }).click();
+      await p.evaluate(() => window.accountRecoveryFixture.settle("api_follow"));
+      await p.getByRole("button", { name: "已关注", exact: true }).waitFor();
+      assert.deepEqual(await p.evaluate(() => window.accountRecoveryFixture.state.follows), [7]);
+      const args = await p.evaluate(() => window.accountRecoveryFixture.calls.filter(c => c.cmd === "api_follow").map(c => c.args.on));
+      assert.deepEqual(args, [true, true]);
+    });
+    await test("user-stale-response", "user-follow", async p => {
+      await p.getByRole("button", { name: "+ 关注", exact: true }).waitFor();
+      await p.evaluate(() => { window.accountRecoveryFixture.held.add("api_follow"); });
+      await p.getByRole("button", { name: "+ 关注", exact: true }).click();
+      await p.evaluate(() => { window.accountRecoveryFixture.navigate("user", 8); });
+      await p.getByRole("heading", { name: "作者 8", exact: true }).waitFor();
+      await p.evaluate(() => window.accountRecoveryFixture.settle("api_follow"));
+      assert.deepEqual(await p.evaluate(() => window.accountRecoveryFixture.state.follows), [], "Late request must not mutate a new user page");
+    });
+    await test("user-unmounted-response", "user-follow", async p => {
+      await p.getByRole("button", { name: "+ 关注", exact: true }).waitFor();
+      await p.evaluate(() => window.accountRecoveryFixture.held.add("api_follow"));
+      await p.getByRole("button", { name: "+ 关注", exact: true }).click();
+      await p.getByRole("button", { name: "返回", exact: true }).click();
+      await p.getByRole("heading", { name: "我的", exact: true }).waitFor();
+      await p.evaluate(() => window.accountRecoveryFixture.settle("api_follow"));
+      assert.deepEqual(await p.evaluate(() => window.accountRecoveryFixture.state.follows), [], "An unmounted page must not persist a late follow response");
+    });
+    await test("user-responsive-dark", "user-follow&theme=dark", async p => {
+      await p.getByRole("heading", { name: "作者 7", exact: true }).waitFor();
+      const button = await p.getByRole("button", { name: "+ 关注", exact: true }).boundingBox();
+      assert(button && button.x >= 0 && button.x + button.width <= 320, "Follow action stays inside narrow page");
+    }, { width: 320, height: 694 });
+  }
   assert.deepEqual(report.errors, [], "No browser errors");
   if (report.failed.length) process.exitCode = 1;
 } catch (e) { report.failed.push({ name: "harness", error: String(e.stack || e) }); process.exitCode = 1; }
