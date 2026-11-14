@@ -8,7 +8,7 @@ import { Loader } from "./ios/effects";
 import { IClose, IEye, IEyeOff, ILogin } from "../icons";
 
 export default function LoginModal() {
-  const { loginOpen, setLoginOpen, setUser, toast } = useStore();
+  const { loginOpen, setLoginOpen, setUser, toast, accountScope, lineEpoch } = useStore();
   const [mode, setMode] = useState<"login" | "register">("login");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -18,11 +18,21 @@ export default function LoginModal() {
   const [err, setErr] = useState("");
   const pending = useRef(false);
   const mounted = useRef(true);
+  const context = useRef({ accountScope, lineEpoch });
+  context.current = { accountScope, lineEpoch };
+  const requestEpoch = useRef(0);
   const errorId = useId();
   const passwordId = useId();
   useEffect(() => {
     mounted.current = true;
-    return () => { mounted.current = false; };
+    const invalidate = () => { requestEpoch.current++; };
+    window.addEventListener("hg:line-changed", invalidate);
+    window.addEventListener("hg:proxy-changed", invalidate);
+    return () => {
+      mounted.current = false;
+      window.removeEventListener("hg:line-changed", invalidate);
+      window.removeEventListener("hg:proxy-changed", invalidate);
+    };
   }, []);
   useEffect(() => {
     if (!loginOpen) { setPassword(""); setShowPassword(false); setErr(""); }
@@ -38,10 +48,16 @@ export default function LoginModal() {
     if (!username.trim() || !password) { setErr("请输入账号与密码"); return; }
     pending.current = true;
     setBusy(true); setErr("");
+    const started = context.current;
+    const epoch = requestEpoch.current;
     try {
       const result = mode === "login" ? await api.login(username.trim(), password) : await api.register(username.trim(), password, email.trim());
       if (!mounted.current) return;
-      setUser(result.user as User); setPassword(""); setLoginOpen(false);
+      if (epoch !== requestEpoch.current || started.accountScope !== context.current.accountScope || started.lineEpoch !== context.current.lineEpoch) {
+        setErr("账号或线路已变化，请重新登录");
+        return;
+      }
+      setUser(result.user as User, result.origin); setPassword(""); setLoginOpen(false);
       toast(mode === "login" ? `欢迎回来，${result.user?.nickname || username}` : "注册成功", "ok");
     } catch (error) { if (mounted.current) setErr(error instanceof Error ? error.message : "操作失败，请重试"); }
     finally { pending.current = false; if (mounted.current) setBusy(false); }
@@ -50,7 +66,7 @@ export default function LoginModal() {
     <div className="ios-dialog-heading"><span className="ios-heading-icon"><ILogin size={21} /></span><h2>{title}</h2>
       <Button className="ios-icon-button" aria-label="关闭登录" onClick={close} disabled={busy}><IClose size={19} /></Button>
     </div>
-    <p className="ios-description">登录后参与互动，收藏与观看记录也可在本地使用。</p>
+    <p className="ios-description">登录后同步账号收藏、关注和观看记录；游客的本机记录单独保留。</p>
     <SegmentedControl className="ios-auth-tabs" aria-label="账号操作" activeIndex={mode === "login" ? 0 : 1}>
       {([ ["login", "登录"], ["register", "注册"] ] as const).map(([key, label]) => <Button key={key}
         disabled={busy} aria-pressed={mode === key} onClick={() => { if (!pending.current) { setMode(key); setErr(""); setShowPassword(false); } }}>{label}</Button>)}

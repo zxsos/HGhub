@@ -12,7 +12,7 @@ await mkdir(output, { recursive: true });
 const report = { environment: 'Real App navigation and components in Chromium, neutral simulated IPC; not native-device playback', checks: [], errors: [] };
 let server, browser;
 try {
-  server = await createServer({ root, server: { host: '127.0.0.1', port: 0 } });
+  server = await createServer({ root, server: { host: '127.0.0.1', port: 0, strictPort: false } });
   await server.listen();
   const origin = server.resolvedUrls.local[0];
   browser = await chromium.launch({ headless: true, executablePath: process.env.BROWSER_EXECUTABLE || undefined });

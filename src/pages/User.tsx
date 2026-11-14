@@ -90,10 +90,15 @@ function PaginationFeedback({ state }: { state: VideoState }) {
 const countLabel = ({ items, total }: VideoState) => `已加载 ${items.length}${total === null ? "" : ` / ${total}`} 部`;
 
 export function FollowingPage({ onBack, wide }: { onBack: () => void; wide: boolean }) {
-  const { push, user, setLoginOpen, setTab } = useStore();
+  const { accountScope, lineEpoch } = useStore();
+  return <FollowingContent key={`${accountScope}:${lineEpoch}`} onBack={onBack} wide={wide} />;
+}
+
+function FollowingContent({ onBack, wide }: { onBack: () => void; wide: boolean }) {
+  const { push, user, setLoginOpen, setTab, accountScope } = useStore();
   const [searching, setSearching] = useState(false);
   // Identity belongs in the dependency list: switching accounts discards the previous feed.
-  const request = useCallback((page: number) => api.following(page, 20), [user?.id]);
+  const request = useCallback((page: number) => api.following(page, 20), [accountScope]);
   const state = useUserVideos(!!user, request);
   return <div className="ios-page absolute inset-0 bg-bg flex flex-col">
     <div className="shrink-0 bg-s1" style={{ paddingTop: "var(--sat, 0px)" }}>
@@ -108,7 +113,7 @@ export function FollowingPage({ onBack, wide }: { onBack: () => void; wide: bool
       {!user ? <Empty icon={<IUser size={26} />} title="登录后查看关注流" sub="关注喜欢的作者，第一时间看到他们的新作品" action="去登录" onAction={() => setLoginOpen(true)} />
         : state.loading && !state.items.length ? <div className="flex justify-center py-12"><Loader /></div>
         : state.err && !state.items.length ? <Empty icon={<IGrid size={26} />} title="关注流加载失败" sub={state.err} action="重试" onAction={() => void state.loadMore()} />
-        : state.items.length ? <Masonry videos={state.items} scopeKey={`following:${user.id}`} wide={wide} onOpen={video => push({ kind: "feed", videoIds: state.items.map(item => item.id), index: state.items.findIndex(item => item.id === video.id), title: "关注" })} />
+        : state.items.length ? <Masonry videos={state.items} scopeKey={`following:${accountScope}`} wide={wide} onOpen={video => push({ kind: "feed", videoIds: state.items.map(item => item.id), index: state.items.findIndex(item => item.id === video.id), title: "关注" })} />
         : <Empty icon={<IGrid size={26} />} title="还没有关注内容" sub="在分类中发现作品，关注喜欢的作者。" action="去分类看看" onAction={() => setTab("category")} />}
       {user && <PaginationFeedback state={state} />}
     </div>
@@ -117,7 +122,12 @@ export function FollowingPage({ onBack, wide }: { onBack: () => void; wide: bool
 }
 
 export function UserPage({ id, name, onBack, wide }: { id: number; name?: string; onBack: () => void; wide: boolean }) {
-  const { push, toast, follows, toggleFollowLocal, user, setLoginOpen } = useStore();
+  const { accountScope, lineEpoch } = useStore();
+  return <UserContent key={`${accountScope}:${lineEpoch}:${id}`} id={id} name={name} onBack={onBack} wide={wide} />;
+}
+
+function UserContent({ id, name, onBack, wide }: { id: number; name?: string; onBack: () => void; wide: boolean }) {
+  const { push, toast, follows, setFollowing, actionPending, accountScope, user, setLoginOpen } = useStore();
   const [searching, setSearching] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [stats, setStats] = useState<Awaited<ReturnType<typeof api.userStats>> | null>(null);
@@ -127,8 +137,8 @@ export function UserPage({ id, name, onBack, wide }: { id: number; name?: string
   const [followBusy, setFollowBusy] = useState(false);
   const [followError, setFollowError] = useState("");
   const followPending = useRef(false);
-  const context = useRef({ id, userId: user?.id, follows });
-  context.current = { id, userId: user?.id, follows };
+  const context = useRef({ id, accountScope });
+  context.current = { id, accountScope };
   const mounted = useRef(false);
   const followVersion = useRef(0);
   const request = useCallback((page: number) => api.userVideos(id, page, 20), [id]);
@@ -139,7 +149,7 @@ export function UserPage({ id, name, onBack, wide }: { id: number; name?: string
     followVersion.current++; followPending.current = false;
     setFollowBusy(false); setFollowError("");
     return () => { mounted.current = false; followVersion.current++; };
-  }, [id, user?.id]);
+  }, [id, accountScope]);
   useEffect(() => { setProfile(null); setStats(null); }, [id]);
   useEffect(() => {
     let alive = true;
@@ -157,18 +167,15 @@ export function UserPage({ id, name, onBack, wide }: { id: number; name?: string
 
   const following = follows.includes(id);
   const onFollow = async () => {
-    if (followPending.current) return;
+    if (followPending.current || actionPending(`follow:${id}`)) return;
     if (!user) { setLoginOpen(true); return; }
     const version = ++followVersion.current;
-    const userId = user.id;
     const on = !following;
     followPending.current = true; setFollowBusy(true); setFollowError("");
-    const current = () => mounted.current && followVersion.current === version && context.current.id === id && context.current.userId === userId;
+    const current = () => mounted.current && followVersion.current === version && context.current.id === id && context.current.accountScope === accountScope;
     try {
-      await api.follow(id, on);
+      await setFollowing(id, on);
       if (!current()) return;
-      // Commit only a confirmed result; failure/cancellation never leaves a persisted optimistic follow.
-      if (context.current.follows.includes(id) !== on) toggleFollowLocal(id);
       toast(on ? `已关注 ${profile?.nickname || name || ""}` : "已取消关注", on ? "ok" : "info");
     } catch (error) {
       if (current()) setFollowError(error instanceof Error ? error.message : "操作失败，请重试");
@@ -201,9 +208,9 @@ export function UserPage({ id, name, onBack, wide }: { id: number; name?: string
             <span>粉丝 <b className="text-on">{stat(stats?.followers)}</b></span>
             <span>获赞 <b className="text-on">{stat(stats?.like_count)}</b></span>
           </div>
-          <Button onClick={() => void onFollow()} disabled={followBusy} aria-pressed={following}
+          <Button onClick={() => void onFollow()} disabled={followBusy || actionPending(`follow:${id}`)} aria-busy={followBusy || actionPending(`follow:${id}`)} aria-pressed={following}
             className={`min-h-11 px-3.5 rounded-full text-[13px] font-semibold shrink-0 ${following ? "bg-s3 text-mut" : "bg-primary text-on-primary"}`}>
-            {followBusy ? "处理中…" : following ? "已关注" : "+ 关注"}
+            {followBusy || actionPending(`follow:${id}`) ? "处理中…" : following ? "已关注" : "+ 关注"}
           </Button>
         </div>
         {followError && <p role="alert" className="mt-3 text-[13px] text-danger break-words">{followError}。关注状态未更改，请重试。</p>}

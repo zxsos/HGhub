@@ -134,7 +134,10 @@ try {
       await p.evaluate(() => { window.accountRecoveryFixture.navigate("user", 8); });
       await p.getByRole("heading", { name: "作者 8", exact: true }).waitFor();
       await p.evaluate(() => window.accountRecoveryFixture.settle("api_follow"));
-      assert.deepEqual(await p.evaluate(() => window.accountRecoveryFixture.state.follows), [], "Late request must not mutate a new user page");
+      await p.waitForFunction(() => window.accountRecoveryFixture.state.follows.includes(7));
+      assert.deepEqual(await p.evaluate(() => window.accountRecoveryFixture.state.follows), [7], "Confirmed follow belongs to the account after navigating away");
+      assert.equal(await p.getByRole("button", { name: "+ 关注", exact: true }).getAttribute("aria-pressed"), "false", "Author 8 must not inherit author 7's follow state");
+      assert.equal(await p.getByText("已关注 作者 7", { exact: true }).count(), 0, "Previous author request must not toast on the new page");
     });
     await test("user-unmounted-response", "user-follow", async p => {
       await p.getByRole("button", { name: "+ 关注", exact: true }).waitFor();
@@ -143,7 +146,9 @@ try {
       await p.getByRole("button", { name: "返回", exact: true }).click();
       await p.getByRole("heading", { name: "我的", exact: true }).waitFor();
       await p.evaluate(() => window.accountRecoveryFixture.settle("api_follow"));
-      assert.deepEqual(await p.evaluate(() => window.accountRecoveryFixture.state.follows), [], "An unmounted page must not persist a late follow response");
+      await p.waitForFunction(() => window.accountRecoveryFixture.state.follows.includes(7));
+      assert.deepEqual(await p.evaluate(() => window.accountRecoveryFixture.state.follows), [7], "Account store persists a confirmed follow even when its page has unmounted");
+      assert.equal(await p.getByText("已关注 作者 7", { exact: true }).count(), 0, "Unmounted author page must not display a late success toast");
     });
     await test("user-responsive-dark", "user-follow&theme=dark", async p => {
       await p.getByRole("heading", { name: "作者 7", exact: true }).waitFor();

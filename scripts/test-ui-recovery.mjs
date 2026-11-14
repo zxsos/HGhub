@@ -14,6 +14,7 @@ const suites = [
   ['profile', ['scripts/test-account-recovery.mjs', 'profile']],
   ['authors', ['scripts/test-account-recovery.mjs', 'user']],
   ['login', ['scripts/test-account-recovery.mjs', 'login']],
+  ['account-sync', ['scripts/test-account-sync.mjs']],
   ['home-desktop', ['scripts/test-home-scheduling.mjs']],
   ['home-mobile', ['scripts/test-home-scheduling.mjs'], { HOME_UI_MOBILE: '1' }],
   ['reading', ['scripts/test-reading-selection.mjs']],
