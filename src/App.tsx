@@ -73,6 +73,23 @@ function StackPage({ page, onBack, wide, top, bottomInset }: {
 }
 
 /* ============ 应用主体 ============ */
+function MainTabs({ wide, pageActive, bottomInset }: { wide: boolean; pageActive: boolean; bottomInset: number }) {
+  const { tab } = useStore();
+  const [visited, setVisited] = useState<ReadonlySet<Tab>>(() => new Set());
+  useEffect(() => {
+    if (pageActive) setVisited(previous => previous.has(tab) ? previous : new Set([...previous, tab]));
+  }, [tab, pageActive]);
+  const mounted = (key: Tab) => visited.has(key) || (pageActive && tab === key);
+  const visible = (key: Tab) => tab === key ? `absolute inset-0 ${key === "home" ? "" : "ios-tab-active"}` : "absolute inset-0 hidden pointer-events-none";
+  // First visits mount on demand; subsequent switches preserve queries, scroll and playback state.
+  return <>
+    <div className={visible("home")} inert={!pageActive || tab !== "home"} aria-hidden={!pageActive || tab !== "home"}>{mounted("home") && <Home active={pageActive && tab === "home"} bottomInset={bottomInset} />}</div>
+    <div className={visible("search")} inert={!pageActive || tab !== "search"} aria-hidden={!pageActive || tab !== "search"}>{mounted("search") && <Search active={pageActive && tab === "search"} wide={wide} />}</div>
+    <div className={visible("category")} inert={!pageActive || tab !== "category"} aria-hidden={!pageActive || tab !== "category"}>{mounted("category") && <Category wide={wide} active={pageActive && tab === "category"} />}</div>
+    <div className={visible("profile")} inert={!pageActive || tab !== "profile"} aria-hidden={!pageActive || tab !== "profile"}>{mounted("profile") && <Profile wide={wide} />}</div>
+  </>;
+}
+
 function AppBody() {
   const { platform, tab, setTab, stack, pop, loginOpen, setLoginOpen, fs, clean } = useStore();
   const mainRef = useRef<HTMLDivElement>(null);
@@ -107,7 +124,6 @@ function AppBody() {
     return () => window.removeEventListener("keydown", fn);
   }, [stack.length, pop, setTab, loginOpen, setLoginOpen]);
 
-  const vis = (k: Tab) => (tab === k ? `absolute inset-0 ${k === "home" ? "" : "ios-tab-active"}` : "absolute inset-0 hidden pointer-events-none");
   const pageActive = stack.length === 0 && !loginOpen;
   const bottomInset = isMobile ? (fs || clean ? 0 : 74) : 14;
   /* 栈页（从搜索/分类/我的进入的播放页、图文页）没有底栏，
@@ -119,10 +135,7 @@ function AppBody() {
     <div className={`absolute inset-0 flex bg-canvas plat-${platform}`}>
       {!isMobile && <DesktopRail collapsed={collapsed} />}
       <div ref={mainRef} className="relative flex-1 min-w-0 overflow-hidden win-main">
-        <div className={vis("home")} inert={!pageActive || tab !== "home"} aria-hidden={!pageActive || tab !== "home"}><Home active={pageActive && tab === "home"} bottomInset={bottomInset} /></div>
-        <div className={vis("search")} inert={!pageActive || tab !== "search"} aria-hidden={!pageActive || tab !== "search"}><Search active={pageActive && tab === "search"} wide={wide} /></div>
-        <div className={vis("category")} inert={!pageActive || tab !== "category"} aria-hidden={!pageActive || tab !== "category"}><Category wide={wide} active={pageActive && tab === "category"} /></div>
-        <div className={vis("profile")} inert={!pageActive || tab !== "profile"} aria-hidden={!pageActive || tab !== "profile"}><Profile wide={wide} /></div>
+        <MainTabs wide={wide} pageActive={pageActive} bottomInset={bottomInset} />
 
         {stack.map((p, i) => (
           <div key={p.key} inert={i !== stack.length - 1 || loginOpen} aria-hidden={i !== stack.length - 1 || loginOpen} className="absolute inset-0 z-30 bg-bg a-page-in" style={{ boxShadow: "-18px 0 40px rgba(0,0,0,.5)" }}>
@@ -190,17 +203,13 @@ function ShellInner({ collapsed, theater }: { collapsed: boolean; theater: boole
     return () => window.removeEventListener("keydown", fn);
   }, [stack.length, pop, setTab, loginOpen, setLoginOpen]);
 
-  const vis = (k: Tab) => (tab === k ? `absolute inset-0 ${k === "home" ? "" : "ios-tab-active"}` : "absolute inset-0 hidden pointer-events-none");
   const pageActive = stack.length === 0 && !loginOpen;
 
   return (
     <div className={`absolute inset-0 flex bg-canvas plat-${platform}`}>
       {!theater && <DesktopRail collapsed={collapsed} />}
       <div ref={mainRef} className={`relative flex-1 min-w-0 overflow-hidden win-main ${theater ? "is-theater-main" : ""}`}>
-        <div className={vis("home")} inert={!pageActive || tab !== "home"} aria-hidden={!pageActive || tab !== "home"}><Home active={pageActive && tab === "home"} bottomInset={14} /></div>
-        <div className={vis("search")} inert={!pageActive || tab !== "search"} aria-hidden={!pageActive || tab !== "search"}><Search active={pageActive && tab === "search"} wide={wide} /></div>
-        <div className={vis("category")} inert={!pageActive || tab !== "category"} aria-hidden={!pageActive || tab !== "category"}><Category wide={wide} active={pageActive && tab === "category"} /></div>
-        <div className={vis("profile")} inert={!pageActive || tab !== "profile"} aria-hidden={!pageActive || tab !== "profile"}><Profile wide={wide} /></div>
+        <MainTabs wide={wide} pageActive={pageActive} bottomInset={14} />
         {stack.map((p, i) => (
           <div key={p.key} inert={i !== stack.length - 1 || loginOpen} aria-hidden={i !== stack.length - 1 || loginOpen} className="absolute inset-0 z-30 bg-bg win-page-in" style={{ boxShadow: "-18px 0 40px rgba(0,0,0,.5)" }}>
             <StackPage page={p} onBack={pop} wide={wide} top={i === stack.length - 1} bottomInset={14} />
