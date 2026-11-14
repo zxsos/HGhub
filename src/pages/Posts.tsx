@@ -23,6 +23,7 @@ export function PostsPage({ onBack, wide }: { onBack: () => void; wide: boolean 
   const [err, setErr] = useState("");
   const busy = useRef(false);
   const sentinel = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   const loadMore = async (reset = false) => {
     if (busy.current) return;
@@ -30,6 +31,7 @@ export function PostsPage({ onBack, wide }: { onBack: () => void; wide: boolean 
     if (!reset && next > pages) return;
     busy.current = true;
     setLoading(true);
+    setErr("");
     try {
       const res = await api.postCategory("remen-chigua", next, 20, "latest");
       setItems((prev) => {
@@ -51,22 +53,22 @@ export function PostsPage({ onBack, wide }: { onBack: () => void; wide: boolean 
   useEffect(() => { loadMore(true); /* eslint-disable-next-line */ }, []);
   useEffect(() => {
     const el = sentinel.current;
-    if (!el) return;
-    const io = new IntersectionObserver((es) => { if (es[0].isIntersecting) loadMore(); }, { rootMargin: "600px" });
+    if (!el || err) return;
+    const io = new IntersectionObserver((es) => { if (es[0].isIntersecting) loadMore(); }, { root: scrollRef.current, rootMargin: "240px" });
     io.observe(el);
     return () => io.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, pages]);
+  }, [page, pages, err]);
 
   return (
     <div className="ios-page absolute inset-0 bg-bg flex flex-col">
       <div className="shrink-0 flex items-center gap-2 px-2 bg-s1" style={{ paddingTop: "var(--sat, 0px)" }}>
         <Button aria-label="返回" onClick={onBack} className="w-9 h-9 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable"><IBack size={19} /></Button>
-        <span className="text-[15px] font-bold text-on">吃瓜</span>
+        <h1 className="text-[15px] font-bold text-on">吃瓜</h1>
         <span className="text-[12px] text-mut ml-1">圈内爆料 · 每日更新</span>
         <Button onClick={() => setSearching(true)} aria-label="搜索吃瓜" className="ml-auto w-9 h-9 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable"><ISearch size={19} /></Button>
       </div>
-      <div className="flex-1 scroll-y px-3 pt-3 pb-8">
+      <div ref={scrollRef} aria-busy={loading} className="flex-1 scroll-y px-3 pt-3 pb-8">
         {items.length ? (
           <div className={`ios-media-grid ${wide ? "is-wide" : ""}`}>
             {items.map((p) => (
@@ -82,12 +84,13 @@ export function PostsPage({ onBack, wide }: { onBack: () => void; wide: boolean 
         )}
         <div ref={sentinel} className="h-10" />
         {err && items.length > 0 && (
-          <div className="flex items-center justify-center gap-3 py-2 text-[11px] text-danger" role="alert">
+          <div className="flex flex-wrap items-center justify-center gap-3 py-2 text-[13px] text-danger" role="alert">
             <span>加载更多失败：{err}</span>
-            <button onClick={() => loadMore()} className="text-primary pressable">重试</button>
+            <Button disabled={loading} onClick={() => loadMore()} className="text-primary pressable">重试</Button>
           </div>
         )}
-        {loading && <div className="flex justify-center py-2"><Loader className="w-6 h-6 spinner" /></div>}
+        {!loading && !err && items.length > 0 && page < pages && <Button onClick={() => loadMore()} className="w-full mt-3">加载更多</Button>}
+        {loading && items.length > 0 && <div className="flex justify-center py-2"><Loader className="w-6 h-6 spinner" /></div>}
       </div>
       {searching && <InplaceSearch kind="post" postLabel="吃瓜帖子" wide={wide} onClose={() => setSearching(false)} onOpenPost={(p) => push({ kind: "post", id: p.id })} />}
     </div>
@@ -109,6 +112,11 @@ export function PostDetail({ id, onBack, active = true }: { id: number; onBack: 
   const [segs, setSegs] = useState<string[]>([]);
   const [seg, setSeg] = useState(0);
   const [resolving, setResolving] = useState(false);
+  const [reload, setReload] = useState(0);
+  const [mediaRetry, setMediaRetry] = useState(0);
+  const [mediaError, setMediaError] = useState("");
+  const [readProgress, setReadProgress] = useState(0);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const content = post?.content || "";
   const src = segs[seg] || "";
   const safeHtml = useMemo(() => sanitizeHtml(content), [content, strictSecurity]);
@@ -120,6 +128,8 @@ export function PostDetail({ id, onBack, active = true }: { id: number; onBack: 
 
   useEffect(() => {
     let alive = true;
+    setReadProgress(0);
+    scrollRef.current?.scrollTo(0, 0);
     setPost(null);
     setErr(null);
     setPlay(false);
@@ -129,21 +139,26 @@ export function PostDetail({ id, onBack, active = true }: { id: number; onBack: 
       .then((p) => {
         if (!alive) return;
         setPost(p);
-        /* 老字段有值就直接用，省一次请求 */
-        if (p.video_url) { setSegs([p.video_url]); setPlay(true); }
+        /* 旧接口返回直链时提供回退，不覆盖已经解析出的分段。 */
+        if (p.video_url) { setSegs(previous => previous.length ? previous : [p.video_url!]); setPlay(true); }
       })
       .catch((e) => { if (alive) setErr((e as Error).message || "加载失败"); });
-    setResolving(true);
+    return () => { alive = false; };
+  }, [id, reload]);
+
+  useEffect(() => {
+    let alive = true;
+    setResolving(true); setMediaError("");
     api.postPlayback(id)
       .then((r) => {
         if (!alive) return;
         const list = (r?.videos || []).map((v) => v?.url || "").filter(Boolean);
         if (list.length) { setSegs(list); setPlay(true); }
       })
-      .catch(() => { /* 无视频：保持图文 */ })
+      .catch(e => { if (alive) setMediaError(e instanceof Error ? e.message : "视频解析失败"); })
       .finally(() => { if (alive) setResolving(false); });
     return () => { alive = false; };
-  }, [id]);
+  }, [id, reload, mediaRetry]);
 
   return (
     <div className="ios-page absolute inset-0 bg-bg flex flex-col">
@@ -152,14 +167,19 @@ export function PostDetail({ id, onBack, active = true }: { id: number; onBack: 
         <span className="text-[14px] font-semibold text-on">吃瓜详情</span>
       </div>
 
-      <div className="flex-1 scroll-y pb-8">
+      <div role="progressbar" aria-label="阅读进度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={readProgress} className="h-1 shrink-0 bg-s3 overflow-hidden"><div className="h-full bg-primary" style={{ width: `${readProgress}%` }} /></div>
+      <div ref={scrollRef} data-post-scroll className="flex-1 scroll-y pb-8" onScroll={event => {
+        const el = event.currentTarget;
+        const range = el.scrollHeight - el.clientHeight;
+        setReadProgress(range > 0 ? Math.round(el.scrollTop / range * 100) : 100);
+      }}>
         {err ? (
-          <Empty icon={<IFireF size={26} />} title="加载失败" sub={err} />
+          <Empty icon={<IFireF size={26} />} title="加载失败" sub={err} action="重试" onAction={() => setReload(n => n + 1)} />
         ) : !post ? (
           <div className="flex justify-center py-12"><Loader className="w-8 h-8 spinner" /></div>
         ) : (
           <>
-            <div className="relative w-full bg-black" style={{ height: "min(40vh, 360px)" }}>
+            <div data-post-media className="relative w-full bg-black mx-auto" style={{ height: isMobile ? "min(48vh, 420px)" : "min(60vh, 640px)" }}>
               {play && src ? (
                 <Player src={src} poster={cover(post.cover)} autoPlay active={active} controls muted={muted}
                   onToggleMute={() => setMuted((m) => !m)} diagnosticContext={{ video_id: id, active }} className="w-full h-full"
@@ -167,34 +187,35 @@ export function PostDetail({ id, onBack, active = true }: { id: number; onBack: 
                     /* 多段吃瓜视频：播完自动接下一段 */
                     if (seg < segs.length - 1) setSeg(seg + 1); else setPlay(false);
                   }} />
-              ) : (
-                <Button aria-label={src ? "播放视频" : resolving ? "正在解析视频" : "播放视频"}
-                  onClick={() => { if (src) setPlay(true); else if (!resolving) toast("该帖子没有视频", "info"); }} className="absolute inset-0">
+              ) : src ? (
+                <Button aria-label="播放视频" onClick={() => setPlay(true)} className="absolute inset-0">
                   <Img src={post.cover} eager />
-                  {src && (
                     <span className="absolute inset-0 flex items-center justify-center">
                       <span className="w-14 h-14 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center elev-2">
                         <IPlayF size={24} className="text-white ml-0.5" />
                       </span>
                     </span>
-                  )}
                 </Button>
+              ) : (
+                <div className="absolute inset-0"><Img src={post.cover} eager /></div>
               )}
+              {resolving && !src && <div className="absolute inset-0 flex items-center justify-center gap-3 pointer-events-none bg-black/40 text-white"><Loader label="正在解析视频" /><span>正在解析视频…</span></div>}
+            </div>
+            {mediaError && !src && <div role="alert" className="flex flex-wrap items-center justify-center gap-3 px-4 py-3 text-[13px] text-danger"><span>{mediaError}</span><Button disabled={resolving} onClick={() => setMediaRetry(n => n + 1)}>重新解析</Button></div>}
               {segs.length > 1 && (
-                <div className="absolute top-2 right-2 z-30 flex items-center gap-1 max-w-[70%] overflow-x-auto no-bar">
+                <div role="group" aria-label="视频分段" className="flex items-center gap-2 px-4 py-3 overflow-x-auto">
                   {segs.map((_, i) => (
-                    <Button key={i} onClick={() => { setSeg(i); setPlay(true); }}
-                      className="shrink-0 h-6 px-2 rounded-full text-[12px] font-semibold pressable"
+                    <Button aria-label={`第 ${i + 1} 段`} aria-pressed={i === seg} key={i} onClick={() => { setSeg(i); setPlay(true); }}
+                      className="shrink-0 min-h-11 px-3 rounded-full text-[13px] font-semibold pressable"
                       style={i === seg
                         ? { background: "var(--p-primary)", color: "var(--p-on-primary)" }
-                        : { background: "rgba(0,0,0,.55)", color: "rgba(255,255,255,.85)" }}>
+                        : { background: "var(--p-s3)", color: "var(--p-on)" }}>
                       {i + 1}
                     </Button>
                   ))}
                 </div>
               )}
-            </div>
-            <div className="px-4 pt-3.5">
+            <div className="px-4 pt-3.5 mx-auto max-w-[800px] select-text">
               <h1 className="text-[17px] font-bold text-on leading-snug">{post.title}</h1>
               <div className="flex items-center gap-2 mt-2 text-[12px] text-mut">
                 <span>{post.publish_time || post.created_at}</span>
