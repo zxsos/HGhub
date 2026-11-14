@@ -14,8 +14,8 @@ try {
   await vite.listen();
   const origin = vite.resolvedUrls.local[0];
   browser = await chromium.launch({ headless: true, executablePath: process.env.BROWSER_EXECUTABLE || undefined });
-  const test = async (name, scenario, body, viewport = { width: 375, height: 812 }) => {
-    const page = await browser.newPage({ viewport, reducedMotion: "reduce", userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148" });
+  const test = async (name, scenario, body, viewport = { width: 375, height: 812 }, userAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148") => {
+    const page = await browser.newPage({ viewport, reducedMotion: "reduce", userAgent });
     page.setDefaultTimeout(4000);
     page.on("pageerror", error => report.errors.push(`${name}: ${error.message}`));
     await page.route("**/*", route => new URL(route.request().url()).origin === new URL(origin).origin ? route.continue() : route.abort());
@@ -150,6 +150,77 @@ try {
       const button = await p.getByRole("button", { name: "+ 关注", exact: true }).boundingBox();
       assert(button && button.x >= 0 && button.x + button.width <= 320, "Follow action stays inside narrow page");
     }, { width: 320, height: 694 });
+  }
+  if (group === "login") {
+    const open = async p => {
+      await p.evaluate(() => window.accountRecoveryFixture.openLogin());
+      return p.getByRole("dialog", { name: "登录 HGhubX", exact: true });
+    };
+    const enter = async modal => {
+      await modal.getByRole("textbox", { name: "账号", exact: true }).fill("fixture-user");
+      await modal.getByLabel("密码", { exact: true }).fill("fixture-password");
+    };
+    await test("login-double-submit", "login", async p => {
+      const modal = await open(p); await enter(modal);
+      await p.evaluate(() => window.accountRecoveryFixture.held.add("api_login"));
+      await modal.locator("form").evaluate(form => { form.requestSubmit(); form.requestSubmit(); });
+      assert.equal(await p.evaluate(() => window.accountRecoveryFixture.calls.filter(c => c.cmd === "api_login").length), 1, "Synchronous submits send one login request");
+      await p.evaluate(() => window.accountRecoveryFixture.settle("api_login"));
+      await modal.waitFor({ state: "hidden" });
+      assert(await p.evaluate(() => !!window.accountRecoveryFixture.state.user));
+    });
+    await test("login-busy-mode-close-guard", "login", async p => {
+      const modal = await open(p); await enter(modal);
+      await p.evaluate(() => window.accountRecoveryFixture.held.add("api_login"));
+      await modal.locator("button[type=submit]").click();
+      assert(await modal.getByRole("button", { name: "注册", exact: true }).isDisabled(), "Do not switch request type while signing in");
+      assert(await modal.getByRole("button", { name: "关闭登录", exact: true }).isDisabled(), "Busy close is visibly disabled");
+      assert.equal(await modal.getByLabel("账号", { exact: true }).getAttribute("readonly"), "");
+      await p.keyboard.press("Escape");
+      await modal.waitFor();
+      await p.evaluate(() => window.accountRecoveryFixture.settle("api_login", false));
+      await modal.getByRole("alert").waitFor();
+      assert.equal(await modal.getByLabel("账号", { exact: true }).inputValue(), "fixture-user");
+      assert.equal(await modal.getByLabel("密码", { exact: true }).inputValue(), "fixture-password");
+      await modal.locator("button[type=submit]").click();
+      await p.evaluate(() => window.accountRecoveryFixture.settle("api_login"));
+      await modal.waitFor({ state: "hidden" });
+    });
+    await test("login-password-visibility-close", "login&theme=dark", async p => {
+      let modal = await open(p); await enter(modal);
+      await modal.getByRole("button", { name: "显示密码", exact: true }).click();
+      assert.equal(await modal.getByLabel("密码", { exact: true }).getAttribute("type"), "text");
+      const toggle = modal.getByRole("button", { name: "隐藏密码", exact: true });
+      assert.equal(await toggle.getAttribute("aria-pressed"), "true");
+      const box = await toggle.boundingBox(); assert(box && box.width >= 44 && box.height >= 44, "Password toggle is touch-sized");
+      await modal.getByRole("button", { name: "关闭登录", exact: true }).click();
+      await modal.waitFor({ state: "hidden" });
+      modal = await open(p);
+      assert.equal(await modal.getByLabel("密码", { exact: true }).inputValue(), "", "Dismissed password is cleared");
+      assert.equal(await modal.getByLabel("密码", { exact: true }).getAttribute("type"), "password");
+    }, { width: 320, height: 694 });
+    await test("login-register-desktop", "login", async p => {
+      let modal = await open(p);
+      await modal.getByRole("button", { name: "注册", exact: true }).click();
+      modal = p.getByRole("dialog", { name: "注册 HGhubX", exact: true });
+      await enter(modal);
+      await modal.getByRole("textbox", { name: "邮箱", exact: true }).fill("fixture@example.invalid");
+      await modal.getByRole("button", { name: "显示密码", exact: true }).click();
+      await p.screenshot({ path: `${output}/login-register-desktop-form.png`, animations: "disabled" });
+      await modal.getByRole("button", { name: "创建账号", exact: true }).click();
+      await modal.waitFor({ state: "hidden" });
+      const request = await p.evaluate(() => window.accountRecoveryFixture.calls.find(c => c.cmd === "api_register"));
+      assert.deepEqual(request?.args, { username: "fixture-user", password: "fixture-password", email: "fixture@example.invalid" });
+    }, { width: 1100, height: 850 }, "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36");
+    await test("login-landscape-layout", "login", async p => {
+      const modal = await open(p); await enter(modal);
+      await modal.getByRole("button", { name: "显示密码", exact: true }).scrollIntoViewIfNeeded();
+      const toggle = await modal.getByRole("button", { name: "显示密码", exact: true }).boundingBox();
+      assert(toggle && toggle.y >= 0 && toggle.y + toggle.height <= 375, "Password control remains reachable in landscape");
+      await modal.locator("button[type=submit]").scrollIntoViewIfNeeded();
+      const submit = await modal.locator("button[type=submit]").boundingBox();
+      assert(submit && submit.y >= 0 && submit.y + submit.height <= 375, "Submit remains reachable in landscape");
+    }, { width: 812, height: 375 });
   }
   assert.deepEqual(report.errors, [], "No browser errors");
   if (report.failed.length) process.exitCode = 1;
