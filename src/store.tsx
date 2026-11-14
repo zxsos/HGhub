@@ -388,7 +388,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const clearSearchHist = useCallback(() => setP((s) => ({ ...s, searchHist: [] })), []);
 
   const logout = useCallback(async () => {
-    try { await api.logout(); } catch { /* ignore */ }
+    await api.logout();
     setUser(null);
     toast("已退出登录", "info");
   }, [toast]);

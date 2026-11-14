@@ -1,10 +1,10 @@
 import { Button, SegmentedControl, Surface } from "../components/ios/controls";
 import { Loader } from "../components/ios/effects";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, APP_VERSION, fmt, fmtTime, isMobile, platform } from "../api";
 import type { Detail } from "../types";
 import { useStore } from "../store";
-import { Avatar, Empty } from "../components/ui";
+import { Avatar, Empty, Modal } from "../components/ui";
 import { MediaCard } from "../components/cards";
 import { CollectionLink, CollectionLinks } from "../components/CollectionLink";
 import { IChevR, IClock, IHeart, ILogout, ISettings, IStar, IUser, IUserF } from "../icons";
@@ -14,30 +14,68 @@ import { IChevR, IClock, IHeart, ILogout, ISettings, IStar, IUser, IUserF } from
 export default function Profile({ wide }: { wide: boolean }) {
   const { user, setLoginOpen, logout, history, favs, clearHistory, push } = useStore();
   const [tab, setTab] = useState<"fav" | "history">("fav");
-  const [cards, setCards] = useState<Detail[]>([]);
+  const [cache, setCache] = useState<Record<number, Detail>>({});
+  const cacheRef = useRef(cache);
+  cacheRef.current = cache;
+  const [limits, setLimits] = useState({ fav: 12, history: 12 });
+  const [failedIds, setFailedIds] = useState<number[]>([]);
+  const [reload, setReload] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [logoutOpen, setLogoutOpen] = useState(false);
+  const [logoutBusy, setLogoutBusy] = useState(false);
+  const [logoutError, setLogoutError] = useState("");
+  const logoutPending = useRef(false);
 
   const ids = tab === "fav" ? favs : history.map((h) => h.id);
+  const visibleIds = ids.slice(0, limits[tab]);
+  const cards = visibleIds.map(id => cache[id]).filter((card): card is Detail => !!card);
+  const failed = failedIds.filter(id => visibleIds.includes(id));
+  const idsKey = visibleIds.join(",");
   /** 观看记录里这条的进度（收藏页没有） */
   const progressOf = (id: number) => (tab === "history" ? history.find((h) => h.id === id) : undefined);
 
   useEffect(() => {
     let alive = true;
-    if (!ids.length) { setCards([]); return; }
+    const missing = visibleIds.filter(id => !cacheRef.current[id]);
+    setFailedIds([]);
+    if (!missing.length) { setLoading(false); return; }
     setLoading(true);
-    Promise.allSettled(ids.slice(0, 12).map((id) => api.video(id)))
-      .then((rs) => {
+    Promise.allSettled(missing.map(id => api.video(id)))
+      .then(results => {
         if (!alive) return;
-        setCards(rs.filter((r) => r.status === "fulfilled").map((r) => (r as PromiseFulfilledResult<Detail>).value));
-      })
-      .finally(() => { if (alive) setLoading(false); });
+        const loaded: Record<number, Detail> = {};
+        const failed: number[] = [];
+        results.forEach((result, index) => {
+          if (result.status === "fulfilled") loaded[missing[index]] = result.value;
+          else failed.push(missing[index]);
+        });
+        setCache(previous => ({ ...previous, ...loaded }));
+        setFailedIds(failed);
+        setLoading(false);
+      });
     return () => { alive = false; };
-  }, [ids.join(",")]);
+  }, [idsKey, tab, reload]);
+
+  const confirmLogout = async () => {
+    if (logoutPending.current) return;
+    logoutPending.current = true;
+    setLogoutBusy(true);
+    setLogoutError("");
+    try {
+      await logout();
+      setLogoutOpen(false);
+    } catch (error) {
+      setLogoutError(error instanceof Error ? error.message : "退出失败，请重试");
+    } finally {
+      logoutPending.current = false;
+      setLogoutBusy(false);
+    }
+  };
 
   return (
     <div className="ios-page absolute inset-0 bg-bg flex flex-col">
       <div className="ios-page-heading shrink-0 px-4 flex items-center">
-        <div className="ios-page-title text-on">我的</div>
+        <h1 className="ios-page-title text-on">我的</h1>
         {isMobile && (
           <Button onClick={() => push({ kind: "settings" })} aria-label="设置"
             className="ios-icon-button ml-auto">
@@ -60,7 +98,7 @@ export default function Profile({ wide }: { wide: boolean }) {
                 <span>关注 <b className="text-on">{fmt(user.counts?.following)}</b></span>
               </div>
             </div>
-            <Button onClick={async () => { await logout(); }}
+            <Button onClick={() => { setLogoutError(""); setLogoutOpen(true); }}
               className="ios-icon-button" aria-label="退出登录">
               <ILogout size={17} />
             </Button>
@@ -100,8 +138,8 @@ export default function Profile({ wide }: { wide: boolean }) {
           ))}
         </SegmentedControl>
 
-        <div className="mt-3">
-          {loading ? (
+        <div className="mt-3" aria-busy={loading}>
+          {loading && !cards.length ? (
             <div className="flex justify-center py-8"><Loader className="w-7 h-7 spinner" /></div>
           ) : cards.length ? (
             <div className={`ios-media-grid ${wide ? "is-wide" : ""}`}>
@@ -117,12 +155,24 @@ export default function Profile({ wide }: { wide: boolean }) {
                   })} />;
               })}
             </div>
+          ) : failed.length ? (
+            <Empty icon={tab === "fav" ? <IStar size={24} /> : <IClock size={24} />}
+              title={tab === "fav" ? "收藏加载失败" : "观看记录加载失败"}
+              sub="本地记录仍在，重试后继续浏览。" action="重试" onAction={() => setReload(n => n + 1)} />
           ) : (
             <Empty icon={tab === "fav" ? <IStar size={24} /> : <IClock size={24} />}
               title={tab === "fav" ? "还没有收藏" : "还没有观看记录"}
               sub={tab === "fav" ? "在剧集页点收藏，之后就能在这里找到" : "看过的剧集会出现在这里"}
               action="去逛逛" onAction={() => push({ kind: "ranks" })} />
           )}
+          {cards.length > 0 && failed.length > 0 && <div role="status" className="mt-3 flex flex-wrap items-center gap-2 text-[13px] text-mut">
+            <span>{failed.length} 项内容加载失败，已加载内容仍可浏览。</span>
+            <Button disabled={loading} onClick={() => setReload(n => n + 1)} className="px-3 text-primary">重试失败内容</Button>
+          </div>}
+          {cards.length > 0 && loading && <div className="flex justify-center py-3"><Loader label="加载更多内容" /></div>}
+          {ids.length > 0 && <p role="status" className="mt-3 text-[12px] text-mut">已显示 {cards.length} / {ids.length} 项本地记录</p>}
+          {visibleIds.length < ids.length && <Button disabled={loading} onClick={() => setLimits(previous => ({ ...previous, [tab]: previous[tab] + 12 }))}
+            className="mt-3 w-full rounded-(--r-ctl) bg-s3 text-[13px] text-on">加载更多</Button>}
           {tab === "history" && history.length > 0 && (
             <Button onClick={clearHistory} className="mt-3 w-full h-9 rounded-(--r-ctl) bg-s3 text-[13px] text-mut pressable">清空观看历史</Button>
           )}
@@ -130,6 +180,19 @@ export default function Profile({ wide }: { wide: boolean }) {
 
         <div className="text-center text-[12px] text-dim mt-5">HGhubX {APP_VERSION} · {platform === "android" ? "Android" : platform === "ios" ? "iOS" : platform === "macos" ? "macOS" : platform === "linux" ? "Linux" : "Windows"} 客户端</div>
       </div>
+      <Modal open={logoutOpen} onClose={() => { if (!logoutPending.current) setLogoutOpen(false); }} label="退出登录">
+        <div className="p-5">
+          <h2 className="text-[18px] font-bold">退出登录</h2>
+          <p className="mt-2 text-[14px] text-mut">退出当前账户？本地收藏和观看记录会保留。</p>
+          {logoutError && <p role="alert" className="mt-3 text-[13px] text-danger">{logoutError}</p>}
+          <div className="mt-4 flex gap-3">
+            <Button variant="secondary" disabled={logoutBusy} onClick={() => setLogoutOpen(false)} className="flex-1">取消</Button>
+            <Button variant="danger" disabled={logoutBusy} onClick={() => void confirmLogout()} className="flex-1 rounded-(--r-ctl) px-3">
+              {logoutBusy ? "正在退出…" : "确认退出"}
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
