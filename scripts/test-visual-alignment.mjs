@@ -105,7 +105,15 @@ try {
         const items = [...document.querySelectorAll('[aria-label="榜单类型"] .ios-button')];
         return items.find(item => item.textContent.trim() === name)?.getAttribute("aria-pressed") === "true";
       }, name);
-      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      /* 等指示器真正落到选中段再量：机器负载高时 transform 可能晚一帧提交，避免偶发错位 */
+      await page.waitForFunction(({ name, tol }) => {
+        const group = document.querySelector('[aria-label="榜单类型"]');
+        const btn = group && [...group.querySelectorAll('.ios-button')].find(b => b.textContent.trim() === name);
+        const indicator = group && group.querySelector('.ios-segmented-indicator');
+        if (!btn || !indicator) return false;
+        const b = btn.getBoundingClientRect(), i = indicator.getBoundingClientRect();
+        return ["left", "top", "width", "height"].every(edge => Math.abs(b[edge] - i[edge]) < tol);
+      }, { name, tol: 1.1 });
       const selected = await rect(button), indicator = await rect(segment.locator(".ios-segmented-indicator"));
       for (const edge of ["left", "top", "width", "height"]) near(selected[edge], indicator[edge], `${width} ${name} indicator ${edge}`);
     }
