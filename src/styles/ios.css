@@ -472,12 +472,22 @@ html.theme-light {
 .ios-settings-chevron { flex:none; margin-inline-end:8px; transition:transform .24s var(--motion-spring-soft); }
 .ios-settings-trigger[aria-expanded=true] .ios-settings-chevron { transform:rotate(90deg); }
 .ios-settings-panel[hidden] { display:none; }
-.ios-settings-panel:not([hidden]) { animation:settings-panel-in .16s ease-out; }
+.ios-settings-panel { position:relative; }
+.ios-settings-panel::after {
+  content:""; position:absolute; inset:-1px; border-radius:21px; pointer-events:none; z-index:1;
+  background:
+    radial-gradient(120% 140% at 50% -10%, color-mix(in srgb, var(--p-primary) 34%, transparent), transparent 58%),
+    radial-gradient(90% 90% at 50% 50%, var(--p-glow), transparent 70%);
+  opacity:0; mix-blend-mode:screen;
+}
+.ios-settings-panel:not([hidden])::after { animation:ios-settings-glow .55s ease-out; }
+.ios-settings-panel:not([hidden]) { animation:settings-panel-in .22s ease-out; }
 .ios-settings-log-path { padding-inline:18px; }
 .ios-settings-log-path>summary { min-block-size:44px; }
 @keyframes settings-panel-in { from { opacity:.6; translate:0 -4px; } to { opacity:1; translate:0 0; } }
+@keyframes ios-settings-glow { 0% { opacity:0; } 45% { opacity:1; } 100% { opacity:0; } }
 @media(prefers-reduced-motion:reduce) {
-  .ios-settings-panel:not([hidden]) { animation:none; }
+  .ios-settings-panel:not([hidden]),.ios-settings-panel:not([hidden])::after { animation:none; }
   .ios-settings-chevron { transition:none; }
 }
 .ios-search-hot-grid { display:grid; grid-template-columns:minmax(0,1fr); gap:8px; }

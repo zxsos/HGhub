@@ -49,7 +49,7 @@ try {
       await trigger('外观').waitFor();
       for (const title of titles) {
         const button = trigger(title);
-        const expanded = title === '外观' || title === '播放';
+        const expanded = false;
         assert.equal(await button.getAttribute('aria-expanded'), String(expanded), `${title}: default expanded state`);
         const panelId = await button.getAttribute('aria-controls');
         assert(panelId, `${title}: named controlled panel`);
@@ -60,7 +60,7 @@ try {
         const bounds = await button.boundingBox();
         assert(bounds.height >= 44 && bounds.width >= 44, `${title}: touch target is ${bounds.width}x${bounds.height}`);
       }
-      report.checks.push(`${label}: seven accessible disclosures, predictable defaults, controlled hidden panels and 44px targets`);
+      report.checks.push(`${label}: seven accessible disclosures, all-collapsed default, controlled hidden panels and 44px targets`);
 
       const geometry = await page.evaluate(() => {
         const box = el => { const r = el.getBoundingClientRect(); return { x: r.x, right: r.right, width: r.width }; };
@@ -86,19 +86,20 @@ try {
 
       await trigger('外观').focus();
       await page.keyboard.press('Enter');
-      assert.equal(await trigger('外观').getAttribute('aria-expanded'), 'false');
-      await page.keyboard.press('Tab');
-      assert(await trigger('播放').evaluate(el => el === document.activeElement), 'Collapsed appearance choices must not be in the tab order');
-      await trigger('外观').focus();
-      await page.keyboard.press('Space');
       assert.equal(await trigger('外观').getAttribute('aria-expanded'), 'true');
       await page.keyboard.press('Tab');
       assert(await page.getByRole('group', { name: '外观模式' }).evaluate(el => el.contains(document.activeElement)), 'Expanded appearance choices must be keyboard accessible');
+      await trigger('外观').focus();
+      await page.keyboard.press('Space');
+      assert.equal(await trigger('外观').getAttribute('aria-expanded'), 'false');
+      await page.keyboard.press('Tab');
+      assert(await trigger('播放').evaluate(el => el === document.activeElement), 'Collapsed appearance choices must not be in the tab order');
       report.checks.push(`${label}: Enter/Space toggles, hidden descendants leave tab order and reopening restores keyboard access`);
 
       await expand('内容偏好');
-      assert.equal(await trigger('外观').getAttribute('aria-expanded'), 'true');
-      assert.equal(await trigger('播放').getAttribute('aria-expanded'), 'true');
+      assert.equal(await trigger('内容偏好').getAttribute('aria-expanded'), 'true');
+      assert.equal(await trigger('外观').getAttribute('aria-expanded'), 'false');
+      assert.equal(await trigger('播放').getAttribute('aria-expanded'), 'false');
       assert.equal(await trigger('网络').getAttribute('aria-expanded'), 'false');
       const input = page.getByRole('textbox', { name: '添加屏蔽标签', exact: true });
       await input.fill('未提交的标签草稿');

@@ -122,6 +122,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   const [heartBurst, setHeartBurst] = useState(0);
   /* —— 移动端手势 —— */
   const [holdSpeed, setHoldSpeed] = useState(false);
+  const [holdSlow, setHoldSlow] = useState(false);
   const [speedLock, setSpeedLock] = useState(false);
   const [lockArmed, setLockArmed] = useState(false);
   const holdRef = useRef(false);
@@ -135,6 +136,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   const gesture = useRef<{
     x: number; y: number; startY: number; t: number; timer: number | null;
     mode: "idle" | "hold" | "scrub" | "pan"; base: number; width: number; playing: boolean;
+    zone: "fast" | "slow" | "menu";
   } | null>(null);
   /* 单击 / 双击判定：单击净屏，双击暂停 */
   const lastTapRef = useRef<{ timer: number | null; clean?: boolean; idle?: boolean }>({ timer: null });
@@ -255,8 +257,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     copyText(u).then(() => toast("链接已复制", "ok")).catch(() => toast("复制失败", "info"));
   };
 
-  /* 倍速：长按 / 锁定 → 2.0x，否则用基准倍速 */
-  const effRate = holdSpeed || speedLock ? 2 : rate;
+  /* 倍速：长按分区 → 右上 2.0x / 左下 0.5x，锁定仍为 2.0x，否则用基准倍速 */
+  const effRate = holdSpeed || speedLock ? 2 : holdSlow ? 0.5 : rate;
   /* 进度条显示百分比（拖动时用拖动值） */
   const barProgress = barPct ?? (duration ? time / duration : 0);
   /* 沉浸全屏 + 横屏视频 → 舞台旋转 90°，看起来就是横屏 */
@@ -545,7 +547,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
       };
       if (gesture.current?.timer) window.clearTimeout(gesture.current.timer);
       gesture.current = null;
-      if (holdRef.current) { holdRef.current = false; setHoldSpeed(false); }
+      if (holdRef.current) { holdRef.current = false; setHoldSpeed(false); setHoldSlow(false); }
       lockArmedRef.current = false;
       setLockArmed(false);
       setZoom((z) => ({ ...z, g: true }));
@@ -554,17 +556,29 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     if (gesture.current || e.button !== 0) return;
     const el = e.currentTarget;
     const width = el.clientWidth || 1;
+    const rect = el.getBoundingClientRect();
+    const nx = rect.width ? (e.clientX - rect.left) / rect.width : 0.5;
+    const ny = rect.height ? (e.clientY - rect.top) / rect.height : 0.5;
+    const diag = nx - ny;
+    const zone: "fast" | "slow" | "menu" = diag < -0.33 ? "slow" : diag > 0.33 ? "fast" : "menu";
     try { el.setPointerCapture(e.pointerId); } catch { /* ignore */ }
     const g = {
       x: e.clientX, y: e.clientY, startY: e.clientY, t: Date.now(), base: time, width,
       mode: "idle" as "idle" | "hold" | "scrub" | "pan",
+      zone,
       playing: videoRef.current?.el()?.paused === false,
       timer: window.setTimeout(() => {
         const cur = gesture.current;
         if (!cur || cur.mode !== "idle") return;
         cur.mode = "hold";
-        holdRef.current = true;
-        setHoldSpeed(true);
+        if (cur.zone === "menu") {
+          holdRef.current = false;
+          setTagMenu(true);
+        } else {
+          holdRef.current = true;
+          if (cur.zone === "slow") setHoldSlow(true);
+          else setHoldSpeed(true);
+        }
         setLockArmed(false);
         lockArmedRef.current = false;
         try { navigator.vibrate?.(25); } catch { /* ignore */ }
@@ -592,8 +606,9 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     const dx = e.clientX - g.x;
     const dy = e.clientY - g.y;
 
-    /* 长按中：上滑 64px 进入「松开即锁定」 */
+    /* 长按中：右上加速区上滑 64px 进入「松开即锁定」；减速/不感兴趣区不锁 */
     if (g.mode === "hold") {
+      if (g.zone !== "fast") return;
       const armed = g.startY - e.clientY > 64;
       if (armed !== lockArmedRef.current) {
         lockArmedRef.current = armed;
@@ -635,7 +650,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     /* 长按状态必须无条件复位：切集 / 组件重建会把手势对象清掉，
        但 holdRef 若留在 true，下面的 touchmove 会一直 preventDefault，
        整个列表就再也滑不动（表现为「播放后不能上滑」）。 */
-    if (holdRef.current) { holdRef.current = false; setHoldSpeed(false); }
+    if (holdRef.current) { holdRef.current = false; setHoldSpeed(false); setHoldSlow(false); }
     const wasLockArmed = lockArmedRef.current;
     if (lockArmedRef.current) { lockArmedRef.current = false; setLockArmed(false); }
     if (!g) return;
@@ -644,6 +659,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     if (g.mode === "hold") {
       holdRef.current = false;
       setHoldSpeed(false);
+      setHoldSlow(false);
       if (!cancelled && wasLockArmed) {
         setSpeedLock(true);
         toast("已锁定 2.0x 倍速 · 点顶部标签解除", "info");
@@ -732,6 +748,16 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   }, []);
 
   const enterFs = useCallback((landscape: boolean) => {
+    /* 先把当前可见项锁定下来，再收起滚动容器：
+       否则进入全屏后 scrollTop 归零，若此前滚动后的 index 还在 150ms 防抖里，
+       会被 resolveSwipe(0) 改回第一屏，出现「全屏后变成另一个视频」。 */
+    const el = boxRef.current;
+    if (el && !isDesktop) {
+      window.clearTimeout(swipeTimer.current);
+      const h = el.clientHeight || 1;
+      const i = Math.max(0, Math.min(videoIds.length - 1, Math.round(el.scrollTop / h)));
+      if (i !== idxRef.current) resolveSwipe(i);
+    }
     setClean(false);
     setFs(true);
     wake();
@@ -744,7 +770,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
         } catch { /* ignore */ }
       }
     }
-  }, [isDesktop, keepAlive, setClean, setFs]);
+  }, [isDesktop, keepAlive, resolveSwipe, videoIds.length, setClean, setFs]);
 
   const exitFs = useCallback(() => {
     setClean(false);
@@ -1317,7 +1343,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
       )}
 
       {/* 移动端：倍速状态 / 锁定提示 */}
-      {!isDesktop && (holdSpeed || speedLock || rate !== 1) && (!fs || !idle) && (
+      {!isDesktop && (holdSpeed || holdSlow || speedLock || rate !== 1) && (!fs || !idle) && (
         <Button
           onClick={() => {
             if (speedLock) { setSpeedLock(false); toast("已解除倍速锁定", "info"); }
@@ -1326,7 +1352,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
           className={`absolute left-1/2 -translate-x-1/2 z-30 flex items-center gap-1.5 px-3.5 h-8 rounded-full backdrop-blur-md text-[13px] font-bold elev-2 pressable ${speedLock ? "bg-primary text-on-primary" : "hg-chip hg-gold"}`}
           style={{ top: "calc(var(--sat, 0px) + 54px)" }}>
           <IBoltF size={13} />
-          {effRate}x {speedLock ? "已锁定 · 点按解除" : holdSpeed ? "倍速中 · 松开恢复" : "倍速"}
+          {effRate}x {speedLock ? "已锁定 · 点按解除" : holdSpeed ? "倍速中 · 松开恢复" : holdSlow ? "减速中 · 松开恢复" : "倍速"}
         </Button>
       )}
       {!isDesktop && holdSpeed && (
@@ -1466,6 +1492,15 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                         </div>
                       </div>
                     </div>
+
+                    {/* 标签 */}
+                    {meta.tags && meta.tags.length > 0 && (
+                      <div className="flex flex-wrap gap-2 mt-3">
+                        {meta.tags.map((tag) => (
+                          <span key={tag} className="px-2.5 h-7 flex items-center rounded-full bg-s3 text-[12px] text-mut">{tag}</span>
+                        ))}
+                      </div>
+                    )}
 
                     {/* 作者 + 关注 */}
                     <Surface className="mt-4 flex items-center gap-2.5 rounded-(--r-md) bg-s2 p-2.5">

@@ -32,12 +32,12 @@ export default function ContentPreferencesSettings() {
     <div className="flex items-center gap-3">
       <div className="flex-1 min-w-0"><h3 className="text-[14px] font-semibold text-on">暂停全部屏蔽</h3>
         <p className="text-[12px] text-mut mt-1">暂时展示所有内容，已保存的标签仍会保留。</p></div>
-      <Toggle label="暂停全部屏蔽" on={preferences.paused} onChange={setPaused} />
+      <Toggle desktop label="暂停全部屏蔽" on={preferences.paused} onChange={setPaused} />
     </div>
     <div className="flex items-center gap-3">
       <div className="flex-1 min-w-0"><h3 className="text-[14px] font-semibold text-on">隐藏无标签视频</h3>
         <p className="text-[12px] text-mut mt-1">默认保留无标签内容；开启后也会受“暂停全部屏蔽”控制。</p></div>
-      <Toggle label="隐藏无标签视频" on={preferences.hideUntagged} onChange={setHideUntagged} />
+      <Toggle desktop label="隐藏无标签视频" on={preferences.hideUntagged} onChange={setHideUntagged} />
     </div>
     <Form className="space-y-2" onSubmit={event => { event.preventDefault(); add(); }}>
       <label className="block text-[13px] font-semibold text-on" htmlFor={`${errorId}-add`}>添加屏蔽标签</label>

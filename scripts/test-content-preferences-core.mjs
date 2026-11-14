@@ -93,7 +93,10 @@ try {
   assert(await page.evaluate(()=>window.preferenceFixture.isTagBlocked('键盘操作')));
  });
  await test('dark-settings-and-large-text-layout',async()=>{
-  await page.setViewportSize({width:375,height:812});await page.getByRole('button',{name:'深色',exact:true}).click();
+  await page.setViewportSize({width:375,height:812});
+  const appearance=page.getByRole('button',{name:'外观设置',exact:true});
+  if(await appearance.getAttribute('aria-expanded')==='false')await appearance.click();
+  await page.getByRole('button',{name:'深色',exact:true}).click();
   await page.waitForFunction(()=>document.documentElement.dataset.theme==='dark');
   await expandPreferences();
   await page.screenshot({path:fileURLToPath(new URL('preferences-dark.png',output)),animations:'disabled'});
