@@ -12,7 +12,7 @@
     "test:api-loading": "node scripts/test-api-loading.mjs",
     "test:channel-pagination": "node scripts/test-channel-pagination.mjs",
     "test:mobile-layout": "node scripts/test-mobile-layout.mjs",
-    "test:ios-ui": "node scripts/test-ios-ui.mjs",
+    "test:ios-ui": "node scripts/test-ios-ui.mjs && node scripts/test-ui-recovery.mjs",
     "test:ios-icons": "node scripts/test-ios-icons.mjs",
     "test:score-badge": "node scripts/test-score-badge-position.mjs",
     "test:ui-performance": "node scripts/test-ui-performance.mjs",
@@ -28,7 +28,8 @@
     "android:icons": "node scripts/sync-android-icons.mjs",
     "ios:icons": "node scripts/generate-ios-icons.mjs",
     "android:dev": "tauri android dev",
-    "android:build": "tauri android build"
+    "android:build": "tauri android build",
+    "test:ui-recovery": "node scripts/test-ui-recovery.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.4",
