@@ -76,7 +76,7 @@ try {
     await page.getByText("新标签影片", { exact: true }).waitFor();
     assert.equal(await page.getByText("旧标签影片", { exact: true }).count(), 0);
   });
-  if (process.env.INCLUDE_CHANNEL === "1") await check("channel retains prior results during sort", async () => {
+  if (process.env.DISCOVER_ONLY !== "1") await check("channel retains prior results during sort", async () => {
     await open("channel"); await ready("api_category", { sort: "latest" }); await complete("api_category", paged(cards));
     await page.getByText("影片 1", { exact: true }).waitFor();
     await page.getByRole("button", { name: "当前热播", exact: true }).click(); await ready("api_category", { sort: "hot_window" });
@@ -87,6 +87,37 @@ try {
     await complete("api_category", paged([{ ...cards[0], title: "热播结果" }]), false, { sort: "hot_window" });
     await page.getByText("热播结果", { exact: true }).waitFor();
   });
+  if (process.env.DISCOVER_ONLY !== "1") {
+    await check("channel ignores superseded sorts and renders empty results", async () => {
+      await open("channel"); await ready("api_category", { sort: "latest" }); await complete("api_category", paged(cards));
+      await page.getByText("影片 1", { exact: true }).waitFor();
+      await page.getByRole("button", { name: "当前热播", exact: true }).click();
+      await ready("api_category", { sort: "hot_window" });
+      await page.getByRole("button", { name: "精选推荐", exact: true }).click();
+      await ready("api_category", { sort: "random" });
+      await complete("api_category", paged([]), false, { sort: "random" });
+      await complete("api_category", paged([{ ...cards[0], title: "过期热播结果" }]), false, { sort: "hot_window" });
+      await page.getByText("该筛选下暂无内容", { exact: true }).waitFor();
+      assert.equal(await page.getByText("过期热播结果", { exact: true }).count(), 0);
+      assert.equal(await page.locator('[aria-busy="true"]').count(), 0);
+    });
+    await check("original filters recover and all remains clickable", async () => {
+      await open("original"); await ready("api_original_videos", { cate: "all" }); await complete("api_original_videos", paged(cards));
+      await page.getByText("影片 1", { exact: true }).waitFor();
+      await page.getByRole("button", { name: "原创漫剧", exact: true }).click();
+      await ready("api_original_videos", { cate: "ai-manju" });
+      await complete("api_original_videos", "HTTP 503", true, { cate: "ai-manju" });
+      await page.getByRole("button", { name: "重试", exact: true }).click();
+      await complete("api_original_videos", paged([{ ...cards[0], title: "原创漫剧结果" }]), false, { cate: "ai-manju" });
+      await page.getByText("原创漫剧结果", { exact: true }).waitFor();
+      assert.equal(await page.locator("[inert]").count(), 0);
+      await page.getByRole("button", { name: "全部原创", exact: true }).click();
+      await complete("api_original_videos", paged(cards), false, { cate: "all" });
+      await page.getByText("影片 1", { exact: true }).waitFor();
+      assert.equal(await page.locator("[inert]").count(), 0, "Returning to all releases the retained grid");
+      assert.equal(await page.getByText("已加载 20 部 · 1/1 页", { exact: true }).count(), 1);
+    });
+  }
   for (const viewport of [{ width: 375, height: 812 }, { width: 812, height: 375 }, { width: 1440, height: 900 }]) {
     await page.setViewportSize(viewport);
     for (const theme of ["light", "dark"]) {
@@ -98,6 +129,20 @@ try {
         const ys = await page.locator(".ios-topic-card").evaluateAll(elements => elements.map(e => Math.round(e.getBoundingClientRect().y)));
         assert(ys.filter(y => y === ys[0]).length >= 3, "Desktop uses more than two columns");
       });
+      if (process.env.DISCOVER_ONLY !== "1") {
+        await open("channel"); await ready("api_category"); await complete("api_category", paged(cards));
+        await page.getByText("影片 1", { exact: true }).waitFor();
+        await page.evaluate(theme => { document.documentElement.classList.toggle("theme-light", theme === "light"); document.documentElement.dataset.theme = theme; }, theme);
+        await page.screenshot({ path: `${output}/channel-${viewport.width}-${theme}.png`, animations: "disabled" });
+        await open("category"); await ready("api_post_category");
+        await complete("api_category", paged(cards.slice(0, 8)), false, { cate: "ai-duanju" });
+        await complete("api_category", paged(cards.slice(0, 8)), false, { cate: "ai-manju" });
+        await complete("api_original_videos", paged(cards.slice(0, 8)));
+        await complete("api_post_category", paged(cards.slice(0, 8)));
+        await page.getByText("分类", { exact: true }).waitFor();
+        await page.evaluate(theme => { document.documentElement.classList.toggle("theme-light", theme === "light"); document.documentElement.dataset.theme = theme; }, theme);
+        await page.screenshot({ path: `${output}/category-${viewport.width}-${theme}.png`, animations: "disabled" });
+      }
       await open("tags"); await ready("api_tags"); await complete("api_tags", groups);
       await page.getByRole("button", { name: /都市/ }).waitFor();
       await page.evaluate(theme => { document.documentElement.classList.toggle("theme-light", theme === "light"); document.documentElement.dataset.theme = theme; }, theme);
