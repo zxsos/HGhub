@@ -12,6 +12,8 @@ type Pending = { cmd: string; args: Record<string, unknown>; resolve: (v: unknow
 const query = new URLSearchParams(location.search);
 const scenario = query.get("scenario") || "profile-error";
 const demoUser = { id: 9, username: "fixture", nickname: "测试账户", counts: {} } as User;
+const fixtureOrigin = "https://fixture.invalid";
+const interactions = { favorite_video_ids: [1, 2, 3], like_video_ids: [] as number[], follow_user_ids: [] as number[], like_video_episodes: [] };
 const card = (id: number) => ({ id, title: `作品 ${id}`, cover: "", description: "", tags: ["测试"], score: 8.5,
   episode_count: 10, total_episodes: 10, is_finished: true, is_original: 0, hot: 100,
   counts: {}, author: { id: 7, name: "测试作者" }, episodes: [], like_count: 0, collect_count: 0, comment_count: 0 });
@@ -43,7 +45,14 @@ const fixture = {
   },
 };
 function result(cmd: string, args: Record<string, unknown>) {
-  if (cmd === "api_login" || cmd === "api_register") return { user: demoUser };
+  if (cmd === "api_login" || cmd === "api_register") return { user: demoUser, origin: fixtureOrigin };
+  if (cmd === "api_me") return { user: demoUser, origin: fixtureOrigin, interactions: { ...interactions, follow_user_ids: [...interactions.follow_user_ids] } };
+  if (cmd === "api_account_history") return { items: [], pagination: { page: 1, pages: 0, size: 100, total: 0 } };
+  if (cmd === "api_follow") {
+    const id = Number(args.uid);
+    interactions.follow_user_ids = args.on ? [...new Set([...interactions.follow_user_ids, id])] : interactions.follow_user_ids.filter(value => value !== id);
+    return { ok: true };
+  }
   if (cmd === "api_video") return card(Number(args.id));
   if (cmd === "api_user") return { id: Number(args.id), username: "author", nickname: `作者 ${args.id}`, sign: "这是较长的作者签名。".repeat(30) };
   if (cmd === "api_user_stats") return { followers: 120, video_count: 40, like_count: 20 };
@@ -52,7 +61,7 @@ function result(cmd: string, args: Record<string, unknown>) {
 }
 Object.assign(window, { accountRecoveryFixture: fixture, __TAURI_INTERNALS__: {
   invoke(cmd: string, args: Record<string, unknown> = {}) {
-    if (cmd === "app_boot") return Promise.resolve({ user: fixture.loggedIn ? demoUser : null, strict_security: true, base: "https://fixture.invalid" });
+    if (cmd === "app_boot") return Promise.resolve({ user: fixture.loggedIn ? demoUser : null, logged_in: fixture.loggedIn, strict_security: true, base: fixtureOrigin });
     if (cmd === "debug_log" || cmd === "playback_log_status") return Promise.resolve(null);
     fixture.calls.push({ cmd, args });
     if (fixture.held.has(cmd)) return new Promise((resolve, reject) => pending.push({ cmd, args, resolve, reject }));

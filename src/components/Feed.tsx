@@ -46,7 +46,7 @@ const stripHtml = (s: string) => s.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, "
 
 export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind = "video", active, bottomInset, onBack, onNearEnd, onBlocked, startEp, startTime }: Props) {
   const store = useStore();
-  const { isLiked, isFav, toggleLikeLocal, toggleFavLocal, toggleFollowLocal, muted, setMuted, volume, setVolume, toast, addHistory, user, setLoginOpen, swipeEp, setSwipeEp, preferHevc, setPreferHevc } = store;
+  const { isLiked, isFav, setLiked, setCollected, setFollowing, actionPending, accountScope, muted, setMuted, volume, setVolume, toast, addHistory, user, setLoginOpen, swipeEp, setSwipeEp, preferHevc, setPreferHevc } = store;
   const isDesktop = !isMobile;
   const contentPreferences = useContentPreferences();
   const { preferences, revision, blockReason } = contentPreferences;
@@ -90,7 +90,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     startTime && startTime > 1 ? { key: `${videoIds[startIndex]}:${startEp || 1}`, t: startTime } : null,
   );
   /* 观看进度：onTime 里节流写回 store，卸载时再兜一次 */
-  const liveRef = useRef({ id: 0, ep: 1, dur: 0, t: 0, permissionKey: "" });
+  const liveRef = useRef({ id: 0, ep: 1, dur: 0, t: 0, permissionKey: "", accountScope: "" });
+  const historyWriter = useRef(addHistory);
   const lastSaveRef = useRef(0);
   const theater = store.theater;
   const setTheater = store.setTheater;
@@ -155,7 +156,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
 
   const curId = videoIds[index];
   const detail = details[curId];
-  const tagKey = `${store.lineEpoch}:${kind}:${curId}`;
+  const tagKey = `${accountScope}:${store.lineEpoch}:${kind}:${curId}`;
   const permissionKey = `${tagKey}:${revision}`;
   const currentTags = kind === "post" ? posts[curId]?.tags : detail?.tags;
   const tagsReady = !!checked[tagKey];
@@ -163,10 +164,31 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   const allowed = !filtering || (tagsReady && (!blocked || (mode !== "home" && viewOnce === permissionKey)));
   const openPreferences = () => store.push({ kind: "settings" });
   const backFromBlock = () => onBack ? onBack() : store.setTab("category");
-  useEffect(() => { setViewOnce(""); setTagMenu(false); }, [curId, revision, store.lineEpoch]);
+  useEffect(() => { setViewOnce(""); setTagMenu(false); }, [curId, revision, store.lineEpoch, accountScope]);
   useEffect(() => { if (blocked && mode === "home" && active) onBlocked?.(curId); }, [blocked, mode, active, curId, onBlocked]);
   useEffect(() => { if (!allowed) { setPanel(null); setTagMenu(false); } }, [allowed]);
   const curEp = epMap[curId] || 1;
+  const liked = isLiked(curId, curEp, kind);
+  const collected = isFav(curId, kind);
+  const likeActionKey = `like:${kind}:${curId}:${curEp}`;
+  const collectActionKey = `collect:${kind}:${curId}`;
+  const followActionKey = `follow:${kind === "video" ? detail?.author?.id || 0 : 0}`;
+  const likePending = actionPending(likeActionKey);
+  const collectPending = actionPending(collectActionKey);
+  const followPending = actionPending(followActionKey);
+  const actionContext = useRef({ accountScope, lineEpoch: store.lineEpoch, id: curId, ep: curEp, kind });
+  actionContext.current = { accountScope, lineEpoch: store.lineEpoch, id: curId, ep: curEp, kind };
+  const progressScope = useRef(accountScope);
+  useLayoutEffect(() => {
+    if (progressScope.current === accountScope) return;
+    progressScope.current = accountScope;
+    resumeRef.current = null;
+    lastSaveRef.current = 0;
+    liveRef.current = { id: 0, ep: 1, dur: 0, t: 0, permissionKey: "", accountScope };
+  }, [accountScope]);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const pendingActions = useRef(new Set<string>());
   const playKey = `${curId}:${curEp}`;
   const playGuard = useRef({ allowed, id: curId, permissionKey, playKey });
   playGuard.current = { allowed, id: curId, permissionKey, playKey };
@@ -194,13 +216,15 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   /* 观看进度：onTime 里每 5 秒落一次；退出播放页时再用 liveRef 兜一次 */
   const onTimeTick = (t: number) => {
     if (!isCurrentPlayback()) return;
-    liveRef.current = { id: curId, ep: curEp, dur: duration, t, permissionKey };
+    // Keep the writer from this observation; a later clear must invalidate old cleanup data.
+    if (active) historyWriter.current = addHistory;
+    liveRef.current = { id: curId, ep: curEp, dur: duration, t, permissionKey, accountScope };
     if (isDesktop) playbackClock.publish(t);
     else setTime(t);
     const now = Date.now();
     if (duration > 0 && now - lastSaveRef.current > 5000) {
       lastSaveRef.current = now;
-      addHistory(curId, curEp, t, duration);
+      if (kind === "video" && active) addHistory(curId, curEp, t, duration);
     }
   };
 
@@ -208,7 +232,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   const onDurationTick = (d: number) => {
     if (!isCurrentPlayback()) return;
     setDuration(d);
-    liveRef.current = { id: curId, ep: curEp, dur: d, t: liveRef.current.id === curId && liveRef.current.ep === curEp ? liveRef.current.t : 0, permissionKey };
+    liveRef.current = { id: curId, ep: curEp, dur: d, t: historyWriter.current === addHistory && liveRef.current.id === curId && liveRef.current.ep === curEp && liveRef.current.accountScope === accountScope ? liveRef.current.t : 0, permissionKey, accountScope };
     const r = resumeRef.current;
     if (r && r.key === playKey && r.t > 1 && (!d || r.t < d - 3)) {
       resumeRef.current = null;
@@ -365,12 +389,12 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     const epoch = store.lineEpoch;
     const need = [videoIds[index], videoIds[index + 1], videoIds[index - 1]].filter(Boolean);
     need.forEach(id => {
-      const key = `${epoch}:${kind}:${id}`;
+      const key = `${accountScope}:${epoch}:${kind}:${id}`;
       if (checked[key]) return;
       setTagErrors(previous => ({ ...previous, [key]: "" }));
       const request = kind === "post" ? api.post(id) : api.video(id);
       request.then(value => {
-        if (!alive) return;
+        if (!alive || actionContext.current.accountScope !== accountScope || actionContext.current.lineEpoch !== epoch) return;
         if (!value) throw new Error("标签详情为空，请重试");
         if (kind === "post") setPosts(previous => ({ ...previous, [id]: value as Post }));
         else setDetails(previous => ({ ...previous, [id]: value as Detail }));
@@ -381,7 +405,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kind, index, videoIds, proxyRetry, store.lineEpoch]);
+  }, [kind, index, videoIds, proxyRetry, store.lineEpoch, accountScope]);
 
   /* 相关推荐：切到当前视频时拉一次 */
   useEffect(() => {
@@ -408,22 +432,22 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
         // src 才是真正喂给播放器的值；video_url 是新接口不再返回的旧字段，别拿它判断成败。
         const raw = info as unknown as Record<string, unknown>;
         const streams = (raw.streams ?? {}) as Record<string, unknown>;
-        const kind = streams.main ? "main" : info?.video_url ? "video_url" : streams.hevc ? "hevc" : "-";
+        const streamKind = streams.main ? "main" : info?.video_url ? "video_url" : streams.hevc ? "hevc" : "-";
         let host = "?";
         try { host = new URL(streamUrl || "").host || "?"; } catch { /* 空地址或非 URL */ }
         logLine(
-          `[play] id=${curId} ep=${curEp} src=${streamUrl ? "y" : "n"} kind=${kind} host=${host}` +
+          `[play] id=${curId} ep=${curEp} src=${streamUrl ? "y" : "n"} kind=${streamKind} host=${host}` +
           (streamUrl ? "" : ` status=${String(raw.status ?? "?")} msg=${String(raw.msg ?? "")}`),
         );
         // 「暂无播放地址」的现场：接口成功但没给地址时，status/msg 是唯一证据。
         tracePlayback("play.resolve", {
-          video_id: curId, episode: curEp, resolved: !!streamUrl, kind, host,
+          video_id: curId, episode: curEp, resolved: !!streamUrl, kind: streamKind, host,
           status: raw.status ?? null, msg: String(raw.msg ?? "") || null,
         });
         if (!streamUrl) throw new Error("暂无播放地址");
         setPlayUrls((m) => ({ ...m, [playKey]: streamUrl }));
         if (hevcStream) setHevcUrls((m) => ({ ...m, [playKey]: hevcStream }));
-        addHistory(curId, curEp);
+        if (kind === "video") addHistory(curId, curEp);
       })
       .catch((e) => { if (alive) setErr((e as Error).message || "取播放地址失败"); });
     return () => { alive = false; };
@@ -473,8 +497,9 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   /* 离开播放页时把最后位置落盘 */
   useEffect(() => () => {
     const s = liveRef.current;
-    if (s.id && s.dur && playGuard.current.allowed && playGuard.current.id === s.id
-      && playGuard.current.playKey === `${s.id}:${s.ep}` && playGuard.current.permissionKey === s.permissionKey) addHistory(s.id, s.ep, s.t, s.dur);
+    if (kind === "video" && s.id && s.dur && playGuard.current.allowed && playGuard.current.id === s.id
+      && actionContext.current.accountScope === s.accountScope
+      && playGuard.current.playKey === `${s.id}:${s.ep}` && playGuard.current.permissionKey === s.permissionKey) historyWriter.current(s.id, s.ep, s.t, s.dur);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -508,7 +533,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     window.addEventListener("keydown", fn);
     return () => window.removeEventListener("keydown", fn);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, allowed, controlsLocked, panel, index, stepDir]);
+  }, [active, allowed, controlsLocked, panel, index, stepDir, accountScope, curEp, kind, liked, collected, likePending, collectPending]);
 
   /* 安卓返回键：面板打开时先关面板 */
   useEffect(() => {
@@ -909,29 +934,50 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     } catch { toast("画中画开启失败", "info"); }
   };
 
-  const requireLogin = () => { if (!user) { setLoginOpen(true); return false; } return true; };
+  const actionIsCurrent = () => mounted.current && actionContext.current.accountScope === accountScope && actionContext.current.lineEpoch === store.lineEpoch
+    && actionContext.current.id === curId && actionContext.current.ep === curEp && actionContext.current.kind === kind;
 
-  const onLike = () => {
-    if (!curId) return;
-    const on = toggleLikeLocal(curId);
-    setHeartBurst((n) => n + 1);
-    toast(on ? "已加入喜欢" : "已取消喜欢", on ? "heart" : "info");
-    if (requireLogin()) { if (kind === "post") api.postLike(curId, on).catch(() => {}); else api.like(curId, curEp, on).catch(() => {}); }
+  const onLike = async () => {
+    const pendingKey = `${accountScope}:${likeActionKey}`;
+    if (!curId || likePending || pendingActions.current.has(pendingKey)) return;
+    pendingActions.current.add(pendingKey);
+    const on = !liked;
+    try {
+      await setLiked(kind, curId, curEp, on);
+      if (!actionIsCurrent()) return;
+      if (on) setHeartBurst((n) => n + 1);
+      toast(on ? "已加入喜欢" : "已取消喜欢", on ? "heart" : "info");
+    } catch (error) {
+      if (actionIsCurrent()) toast(error instanceof Error ? error.message : "点赞失败，请重试", "info");
+    } finally { pendingActions.current.delete(pendingKey); }
   };
 
-  const onFav = () => {
-    if (!curId) return;
-    const on = toggleFavLocal(curId);
-    toast(on ? "已收藏" : "已取消收藏", on ? "star" : "info");
-    if (requireLogin()) { if (kind === "post") api.postCollect(curId, on).catch(() => {}); else api.collect(curId, on).catch(() => {}); }
+  const onFav = async () => {
+    const pendingKey = `${accountScope}:${collectActionKey}`;
+    if (!curId || collectPending || pendingActions.current.has(pendingKey)) return;
+    pendingActions.current.add(pendingKey);
+    const on = !collected;
+    try {
+      await setCollected(kind, curId, on);
+      if (actionIsCurrent()) toast(on ? "已收藏" : "已取消收藏", on ? "star" : "info");
+    } catch (error) {
+      if (actionIsCurrent()) toast(error instanceof Error ? error.message : "收藏失败，请重试", "info");
+    } finally { pendingActions.current.delete(pendingKey); }
   };
 
-  const onFollow = () => {
+  const onFollow = async () => {
     const uid = meta.authorId > 0 ? meta.authorId : undefined;
-    if (!uid) return;
-    const on = toggleFollowLocal(uid);
-    toast(on ? `已关注 ${detail?.author?.name}` : "已取消关注", on ? "ok" : "info");
-    if (requireLogin()) api.follow(uid, on).catch(() => {});
+    const pendingKey = `${accountScope}:${followActionKey}`;
+    if (!uid || followPending || pendingActions.current.has(pendingKey)) return;
+    if (!user) { setLoginOpen(true); return; }
+    pendingActions.current.add(pendingKey);
+    const on = !store.follows.includes(uid);
+    try {
+      await setFollowing(uid, on);
+      if (actionIsCurrent()) toast(on ? `已关注 ${meta.author}` : "已取消关注", on ? "ok" : "info");
+    } catch (error) {
+      if (actionIsCurrent()) toast(error instanceof Error ? error.message : "关注失败，请重试", "info");
+    } finally { pendingActions.current.delete(pendingKey); }
   };
 
   const pickEp = (ep: number) => {
@@ -941,8 +987,10 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
 
   const likeCount = useMemo(() => {
     const base = meta.like;
-    return base + (isLiked(curId) ? 1 : 0);
-  }, [meta.like, curId, isLiked]);
+    const loadedLiked = kind === "video" && detail?.interaction?.liked
+      && (detail.interaction.liked_ep === undefined || detail.interaction.liked_ep === curEp);
+    return Math.max(0, base + Number(liked) - Number(!!loadedLiked));
+  }, [meta.like, liked, kind, detail?.interaction, curEp]);
 
   if (curId && !allowed) {
     const error = tagErrors[tagKey];
@@ -985,7 +1033,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
           if (isDesktop && Math.abs(i - index) > 1 && Math.abs(i - renderIndex) > 1) {
             return <section key={vid} className={sectionClass} aria-hidden="true" />;
           }
-          if (filtering && !isActive && (!checked[`${store.lineEpoch}:${kind}:${vid}`] || blockReason(kind === "post" ? posts[vid]?.tags : details[vid]?.tags))) {
+          if (filtering && !isActive && (!checked[`${accountScope}:${store.lineEpoch}:${kind}:${vid}`] || blockReason(kind === "post" ? posts[vid]?.tags : details[vid]?.tags))) {
             return <section key={vid} className={sectionClass} aria-hidden="true" />;
           }
           return (
@@ -1129,8 +1177,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                       <span className="text-[12px] hg-ov-shadow" style={{ color: preferHevc ? "#fff" : undefined }}>{preferHevc ? "高清" : "标清"}</span>
                     </Button>
                   )}
-                  <Button onClick={onFav} className="flex flex-col items-center gap-1 pressable" aria-pressed={isFav(curId)} aria-label="收藏">
-                    {isFav(curId) ? <IStarF size={27} className="hg-gold" /> : <IStar size={27} className="hg-ink hg-ov-shadow" />}
+                  <Button onClick={() => void onFav()} disabled={collectPending} aria-busy={collectPending} className="flex flex-col items-center gap-1 pressable" aria-pressed={collected} aria-label="收藏">
+                    {collected ? <IStarF size={27} className="hg-gold" /> : <IStar size={27} className="hg-ink hg-ov-shadow" />}
                     <span className="text-[12px] hg-ink-2 hg-ov-shadow">收藏</span>
                   </Button>
                   <Button onClick={() => setPanel("comments")} className="flex flex-col items-center gap-1 pressable" aria-label="评论">
@@ -1163,9 +1211,9 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
 
                 {kind === "video" && (
                   <>
-                    <Button onClick={onLike} aria-label="点赞" className="flex flex-col items-center gap-1 pressable" aria-pressed={isLiked(curId)}>
+                    <Button onClick={() => void onLike()} disabled={likePending} aria-busy={likePending} aria-label="点赞" className="flex flex-col items-center gap-1 pressable" aria-pressed={liked}>
                       <span key={heartBurst} className={heartBurst ? "a-pop" : ""}>
-                        {isLiked(curId) ? <IHeartF size={30} className="text-neon" /> : <IHeart size={30} className="text-white tsh" />}
+                        {liked ? <IHeartF size={30} className="text-neon" /> : <IHeart size={30} className="text-white tsh" />}
                       </span>
                       <span className="text-[12px] text-white/90 tabular-nums">{fmt(likeCount)}</span>
                     </Button>
@@ -1175,8 +1223,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                       <span className="text-[12px] text-white/90 tabular-nums">{fmt(meta.comment)}</span>
                     </Button>
 
-                    <Button onClick={onFav} aria-label="收藏" className="flex flex-col items-center gap-1 pressable" aria-pressed={isFav(curId)}>
-                      {isFav(curId) ? <IStarF size={27} className="hg-gold" /> : <IStar size={27} className="hg-ink hg-ov-shadow" />}
+                    <Button onClick={() => void onFav()} disabled={collectPending} aria-busy={collectPending} aria-label="收藏" className="flex flex-col items-center gap-1 pressable" aria-pressed={collected}>
+                      {collected ? <IStarF size={27} className="hg-gold" /> : <IStar size={27} className="hg-ink hg-ov-shadow" />}
                       <span className="text-[12px] text-white/90 tabular-nums">{fmt(meta.collect)}</span>
                     </Button>
 
@@ -1515,7 +1563,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                         </div>
                       </Button>
                       {meta.authorId > 0 && (
-                        <Button onClick={onFollow}
+                        <Button onClick={() => void onFollow()} disabled={followPending} aria-busy={followPending}
                           className={`h-7 px-3 rounded-full text-[12px] font-semibold pressable shrink-0 ${store.follows.includes(meta.authorId) ? "bg-s3 text-mut" : "bg-primary text-on-primary"}`}>
                           {store.follows.includes(meta.authorId) ? "已关注" : "+ 关注"}
                         </Button>

@@ -15,6 +15,9 @@ import "../src/index.css";
 type Args = Record<string, unknown>;
 const query = new URLSearchParams(location.search);
 const screen = query.get("screen") || "masonry";
+const fixtureOrigin = "https://fixture.invalid";
+const loggedIn = screen === "following";
+const fixtureUser = { id: 9, nickname: "测试账户", username: "fixture" };
 const allBlocked = query.get("data") === "all";
 const pages = Number(query.get("pages") || 1);
 const card = (id: number, tags: string[]): VideoCard => ({ id, title: id === 1 ? "精确屏蔽标题" : `可见标题 ${id}`, cover: `https://fixture.invalid/${id === 1 ? "blocked-cover" : `cover-${id}`}.png`, tags, score: 8,
@@ -29,6 +32,8 @@ const fixture = {
   settle() { for (const request of pending.splice(0)) request.resolve(result(request.cmd, request.args)); },
 };
 function result(cmd: string, args: Args) {
+  if (cmd === "api_me") return { user: fixtureUser, origin: fixtureOrigin, interactions: { favorite_video_ids: [1, 2], like_video_ids: [], follow_user_ids: [7], like_video_episodes: [] } };
+  if (cmd === "api_account_history") return { items: [], pagination: { page: 1, pages: 0, size: 100, total: 0 } };
   if (["api_category", "api_original_videos", "api_post_category", "api_search", "api_tag_videos", "api_following", "api_user_videos"].includes(cmd)) return { ...pageOf(Number(args.page)), keyword: args.q };
   if (cmd === "api_rank") return { type: args.kind, items: cards.map((item, i) => ({ ...item, rank: i + 1, video_id: item.id, metric_value: 100, metric_label: "热度" })) };
   if (cmd === "api_topic") return { topic: { id: 1, title: "专题 fixture", intro: "专题介绍", cover: "", slug: args.slug }, related: [], videos: pageOf(1) };
@@ -39,7 +44,8 @@ function result(cmd: string, args: Args) {
   return null;
 }
 Object.assign(window, { contentFilterFixture: fixture, __TAURI_INTERNALS__: { invoke(cmd: string, args: Args = {}) {
-  if (cmd === "app_boot") return Promise.resolve({ user: { id: 9, nickname: "测试账户", username: "fixture" }, strict_security: true });
+  // Profile verifies retained guest records; only the following screen requires an account.
+  if (cmd === "app_boot") return Promise.resolve({ user: loggedIn ? fixtureUser : null, logged_in: loggedIn, base: fixtureOrigin, strict_security: true });
   if (cmd === "debug_log" || cmd === "playback_log_status") return Promise.resolve(null);
   fixture.calls.push({ cmd, args });
   return fixture.held.has(cmd) ? new Promise(resolve => pending.push({ cmd, args, resolve })) : Promise.resolve(result(cmd, args));
