@@ -36,15 +36,19 @@ try {
     await page.goto(origin);
     if (mobile) await page.getByRole('navigation', { name: '主导航' }).getByRole('button', { name: '我的', exact: true }).click();
     await page.getByRole('button', { name: '设置', exact: true }).click();
-    const jump = page.getByRole('navigation', { name: '设置分组' });
-    await jump.getByRole('button', { name: '其他', exact: true }).click();
+    const expand = async title => {
+      const trigger = page.getByRole('button', { name: `${title}设置`, exact: true });
+      if (await trigger.getAttribute('aria-expanded') === 'false') await trigger.click();
+      await trigger.scrollIntoViewIfNeeded();
+    };
+    await expand('其他');
     await page.getByRole('button', { name: /检查更新/ }).click();
     await page.getByRole('status', { name: '正在检查更新' }).waitFor();
     assert(await page.getByRole('button', { name: /检查更新/ }).isDisabled());
     await page.evaluate(() => window.settingsUX.releaseUpdate());
     await page.getByText('已是最新版本 v2.0.0', { exact: true }).waitFor();
-    report.checks.push(`${mobile ? 'mobile' : 'desktop'}: section jump and update busy feedback`);
-    await jump.getByRole('button', { name: '本地数据', exact: true }).click();
+    report.checks.push(`${mobile ? 'mobile' : 'desktop'}: section expansion and update busy feedback`);
+    await expand('本地数据');
     await page.getByRole('button', { name: /清理缓存/ }).click();
     const dialog = page.getByRole('dialog', { name: '清理缓存', exact: true });
     await dialog.getByRole('button', { name: '确定清理' }).click();
@@ -54,12 +58,12 @@ try {
     await dialog.getByRole('button', { name: '确定清理' }).click();
     await page.getByText('缓存已清理', { exact: true }).waitFor();
     report.checks.push(`${mobile ? 'mobile' : 'desktop'}: cache failure retained, retry succeeds, no false success`);
-    await jump.getByRole('button', { name: '其他', exact: true }).click();
+    await expand('其他');
     await page.getByRole('button', { name: /关于 HGhubX/ }).click();
     await page.getByRole('dialog', { name: '关于 HGhubX' }).getByRole('button', { name: '打开项目仓库' }).waitFor();
     await page.screenshot({ path: fileURLToPath(new URL(`${mobile ? 'mobile' : 'desktop'}-about.png`, out)) });
     await page.keyboard.press('Escape');
-    await jump.getByRole('button', { name: '外观', exact: true }).click();
+    await expand('外观');
     await page.screenshot({ path: fileURLToPath(new URL(`${mobile ? 'mobile' : 'desktop'}-settings.png`, out)) });
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
     report.checks.push(`${mobile ? 'mobile' : 'desktop'}: named dialogs, truthful open action, no overflow`);

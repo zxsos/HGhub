@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { fmt } from "../api";
 import type { Post, VideoCard } from "../types";
 import { MediaCard, Masonry } from "./cards";
+import { FilteredContent } from "./FilteredContent";
 import { Empty } from "./ui";
 import { IBack, IClose, ISearch } from "../icons";
 import { useSearchResults } from "../useSearchResults";
@@ -39,7 +40,7 @@ export function InplaceSearch({ kind, postLabel = "吃瓜帖", scope, onOpenVide
     <div className="ios-page absolute inset-0 z-20 bg-bg flex flex-col">
       <div className="shrink-0 px-4 pb-3 flex items-center gap-2.5 bg-s1" style={{ paddingTop: "calc(var(--sat, 0px) + 12px)" }}>
         <Button onClick={onClose} className="w-9 h-9 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable" aria-label="退出搜索"><IBack size={19} /></Button>
-        <Form className="flex-1 flex items-center gap-2 h-11 rounded-(--r-ctl) bg-s3 px-3.5 focus-within:bg-s4 transition-colors"
+        <Form className="flex-1 min-w-0 flex items-center gap-2 h-11 rounded-(--r-ctl) bg-s3 px-3.5 focus-within:bg-s4 transition-colors"
           onSubmit={(e) => { e.preventDefault(); submit(q); }}>
           <ISearch size={17} className="text-mut shrink-0" />
           <Input ref={inputRef} autoFocus aria-label={`${label}搜索关键词`} value={q} onChange={(e) => setQ(e.target.value)} placeholder={`搜索${label}…`}
@@ -63,12 +64,12 @@ export function InplaceSearch({ kind, postLabel = "吃瓜帖", scope, onOpenVide
           <section aria-label="栏目搜索结果" aria-busy={loading}>
             {result && count > 0 ? <>
               {kind === "post" ? (
-                <div className={`ios-media-grid ${wide ? "is-wide" : ""}`}>
-                  {posts.map((post) => (
+                <FilteredContent items={posts} scopeKey={JSON.stringify([submitted, kind, scope, result.keyword, result.kind])}>{visible => <div className={`ios-media-grid ${wide ? "is-wide" : ""}`}>
+                  {visible.map((post) => (
                     <MediaCard key={post.id} title={post.title} cover={post.cover} subtitle={`${fmt(post.hot)} 次浏览`} onOpen={() => onOpenPost?.(post)} />
                   ))}
-                </div>
-              ) : <Masonry videos={items} wide={wide} onOpen={(v) => onOpenVideo?.(v, items)} />}
+                </div>}</FilteredContent>
+              ) : <Masonry videos={items} scopeKey={JSON.stringify([submitted, kind, scope, result.keyword, result.kind])} wide={wide} onOpen={(v) => onOpenVideo?.(v, items)} />}
             </> : loading ? <div className="flex justify-center py-12"><Loader label="正在搜索" className="w-8 h-8 spinner" /></div>
               : !error && <Empty icon={<ISearch size={26} />}
                 title={result && result.page < result.pages ? "已加载页面没有匹配内容" : "没有找到相关内容"}

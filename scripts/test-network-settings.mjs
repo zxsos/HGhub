@@ -67,6 +67,7 @@ try {
     }, { theme });
     await page.goto(`${origin}tests/line-selection.html`);
     await page.waitForFunction(() => window.lineSelectionSnapshot?.ready);
+    await page.getByRole("button", { name: "网络设置", exact: true }).click();
     return { page, context };
   }
   const calls = (page, command) => page.evaluate(command => window.networkSettingsFixture.calls.filter(row => row.command === command), command);

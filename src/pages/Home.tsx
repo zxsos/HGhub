@@ -6,6 +6,8 @@ import type { VideoCard } from "../types";
 import { useStore } from "../store";
 import { ISearch } from "../icons";
 import { Empty } from "../components/ui";
+import { Button } from "../components/ios/controls";
+import { useContentPreferences } from "../contentPreferences";
 
 /* Fisher-Yates 洗牌：首页第一页随机打乱，避免每次进来都停在同一个 top1 */
 function shuffle<T>(arr: T[]): T[] {
@@ -18,7 +20,12 @@ function shuffle<T>(arr: T[]): T[] {
 }
 
 export default function Home({ active, bottomInset }: { active: boolean; bottomInset: number }) {
-  const { toast, lineEpoch } = useStore();
+  const { toast, lineEpoch, push } = useStore();
+  const { preferences, revision, blockReason } = useContentPreferences();
+  const filtering = !preferences.paused && (preferences.blockedTags.length > 0 || preferences.hideUntagged);
+  const [excluded, setExcluded] = useState<{ revision: number; epoch: number; ids: number[] }>({ revision, epoch: lineEpoch, ids: [] });
+  const autoFill = useRef(1);
+  useEffect(() => { autoFill.current = 1; }, [revision, lineEpoch]);
   const [items, setItems] = useState<VideoCard[]>([]);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -93,13 +100,37 @@ export default function Home({ active, bottomInset }: { active: boolean; bottomI
   }, [active, lineEpoch, items.length, load]);
   useEffect(() => { if (active && items.length) setFeedMounted(true); }, [active, items.length]);
 
-  const ids = useMemo(() => items.map((v) => v.id), [items]);
+  const blockedByDetail = excluded.revision === revision && excluded.epoch === lineEpoch ? excluded.ids : [];
+  const visibleItems = items.filter(item => !blockReason(item.tags) && !blockedByDetail.includes(item.id));
+  const visibleKey = visibleItems.map(item => item.id).join(",");
+  const ids = useMemo(() => visibleKey ? visibleKey.split(",").map(Number) : [], [visibleKey]);
+  const onBlocked = useCallback((id: number) => setExcluded(previous => {
+    const ids = previous.revision === revision && previous.epoch === lineEpoch ? previous.ids : [];
+    return ids.includes(id) ? previous : { revision, epoch: lineEpoch, ids: [...ids, id] };
+  }), [revision, lineEpoch]);
+  const hiddenCount = items.length - ids.length;
+  // A fully filtered page may be followed by usable content. Stop after three pages
+  // per automatic fill cycle; user-initiated continuation is explicit and bounded.
+  useEffect(() => {
+    if (!active || !filtering || ids.length || !hiddenCount || loading || loadingRef.current || done || error || autoFill.current >= 3) return;
+    autoFill.current++;
+    void load(page + 1);
+  }, [active, filtering, ids.length, hiddenCount, loading, done, error, page, load, revision]);
+  const loadNextFilteredPage = () => { autoFill.current = 1; void load(page + 1); };
+
 
   return (
     <div className="absolute inset-0 bg-black">
-      {items.length && (active || feedMounted) ? (
-        <Feed videoIds={ids} mode="home" active={active} bottomInset={bottomInset}
+      {ids.length > 0 && (active || feedMounted) ? (
+        <Feed videoIds={ids} mode="home" active={active} bottomInset={bottomInset} onBlocked={onBlocked}
           onNearEnd={() => { if (!loading && !done && Date.now() >= retryAt.current) load(page + 1); }} />
+      ) : hiddenCount > 0 ? (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-bg px-5 pb-24">
+          <Empty icon={<ISearch size={26} />} title="已隐藏不感兴趣的内容"
+            sub={loading ? "正在补充其他内容…" : error ? `继续加载失败：${error}` : done ? "当前推荐已筛选完，可调整屏蔽标签。" : "已达到本次自动补充上限，可继续加载。"} />
+          {loading ? <Loader label="正在补充内容" /> : !done && <Button className="mt-3 px-5 rounded-full bg-s3" onClick={loadNextFilteredPage}>{error ? "重试加载" : "继续加载"}</Button>}
+          <Button className="mt-3 px-4 text-primary" onClick={() => push({ kind: "settings" })}>管理屏蔽标签</Button>
+        </div>
       ) : !loading && error ? (
         <div className="absolute inset-0 flex items-center justify-center bg-bg">
           <Empty icon={<ISearch size={26} />} title="首页加载失败" sub={error} action="重试" onAction={() => void load(1)} />

@@ -11,10 +11,16 @@ import Player from "../components/Player";
 import { IBack, IFireF, IPlayF, ISearch } from "../icons";
 import { handleArticleClick, sanitizeHtml } from "../html";
 import { InplaceSearch } from "../components/InplaceSearch";
+import { FilteredContent } from "../components/FilteredContent";
+import { ContentBlockNotice } from "../components/ContentBlockNotice";
+import { TagBlockMenu } from "../components/TagBlockMenu";
+import { useContentPreferences } from "../contentPreferences";
 
 /* ================= 吃瓜列表 ================= */
 export function PostsPage({ onBack, wide }: { onBack: () => void; wide: boolean }) {
   const { push } = useStore();
+  const { preferences } = useContentPreferences();
+  const filtering = !preferences.paused && (preferences.blockedTags.length > 0 || preferences.hideUntagged);
   const [searching, setSearching] = useState(false);
   const [items, setItems] = useState<Post[]>([]);
   const [page, setPage] = useState(0);
@@ -53,12 +59,12 @@ export function PostsPage({ onBack, wide }: { onBack: () => void; wide: boolean 
   useEffect(() => { loadMore(true); /* eslint-disable-next-line */ }, []);
   useEffect(() => {
     const el = sentinel.current;
-    if (!el || err) return;
+    if (!el || err || filtering) return;
     const io = new IntersectionObserver((es) => { if (es[0].isIntersecting) loadMore(); }, { root: scrollRef.current, rootMargin: "240px" });
     io.observe(el);
     return () => io.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, pages, err]);
+  }, [page, pages, err, filtering]);
 
   return (
     <div className="ios-page absolute inset-0 bg-bg flex flex-col">
@@ -70,11 +76,13 @@ export function PostsPage({ onBack, wide }: { onBack: () => void; wide: boolean 
       </div>
       <div ref={scrollRef} aria-busy={loading} className="flex-1 scroll-y px-3 pt-3 pb-8">
         {items.length ? (
+          <FilteredContent items={items} scopeKey="posts">{visible => (
           <div className={`ios-media-grid ${wide ? "is-wide" : ""}`}>
-            {items.map((p) => (
+            {visible.map((p) => (
               <MediaCard key={p.id} title={p.title} cover={p.cover} subtitle={`${fmt(p.hot)} 次浏览`} onOpen={() => push({ kind: "post", id: p.id })} />
             ))}
           </div>
+          )}</FilteredContent>
         ) : loading ? (
           <div className="flex justify-center py-12"><Loader className="w-8 h-8 spinner" /></div>
         ) : err ? (
@@ -103,8 +111,17 @@ const HIDDEN_POST_TAG = "\u9ec4\u679c";
 
 /* ================= 吃瓜详情（网页式浏览） ================= */
 export function PostDetail({ id, onBack, active = true }: { id: number; onBack: () => void; active?: boolean }) {
-  const { toast, strictSecurity, muted, setMuted } = useStore();
+  const { toast, strictSecurity, muted, setMuted, push } = useStore();
+  const { preferences, revision, blockReason } = useContentPreferences();
+  const filtering = !preferences.paused && (preferences.blockedTags.length > 0 || preferences.hideUntagged);
   const [post, setPost] = useState<(Post & { content?: string; video_url?: string }) | null>(null);
+  const [loadedId, setLoadedId] = useState<number | null>(null);
+  const [viewOnce, setViewOnce] = useState("");
+  const [tagMenu, setTagMenu] = useState(false);
+  const currentPost = loadedId === id ? post : null;
+  const blocked = currentPost ? blockReason(currentPost.tags) : null;
+  const bypassKey = `${id}:${revision}`;
+  const allowed = !filtering || (!!currentPost && (!blocked || viewOnce === bypassKey));
   const [err, setErr] = useState<string | null>(null);
   const [play, setPlay] = useState(false);
   /* 吃瓜帖详情里的 video_url 恒为空，视频地址只在 playback 接口里；
@@ -131,6 +148,9 @@ export function PostDetail({ id, onBack, active = true }: { id: number; onBack: 
     setReadProgress(0);
     scrollRef.current?.scrollTo(0, 0);
     setPost(null);
+    setLoadedId(null);
+    setViewOnce("");
+    setTagMenu(false);
     setErr(null);
     setPlay(false);
     setSegs([]);
@@ -139,6 +159,7 @@ export function PostDetail({ id, onBack, active = true }: { id: number; onBack: 
       .then((p) => {
         if (!alive) return;
         setPost(p);
+        setLoadedId(id);
         /* 旧接口返回直链时提供回退，不覆盖已经解析出的分段。 */
         if (p.video_url) { setSegs(previous => previous.length ? previous : [p.video_url!]); setPlay(true); }
       })
@@ -147,6 +168,7 @@ export function PostDetail({ id, onBack, active = true }: { id: number; onBack: 
   }, [id, reload]);
 
   useEffect(() => {
+    if (!allowed) { setResolving(false); return; }
     let alive = true;
     setResolving(true); setMediaError("");
     api.postPlayback(id)
@@ -158,13 +180,19 @@ export function PostDetail({ id, onBack, active = true }: { id: number; onBack: 
       .catch(e => { if (alive) setMediaError(e instanceof Error ? e.message : "视频解析失败"); })
       .finally(() => { if (alive) setResolving(false); });
     return () => { alive = false; };
-  }, [id, reload, mediaRetry]);
+  }, [id, reload, mediaRetry, allowed]);
+
+  // Guard the whole surface: no poster, article HTML or media element is mounted while blocked.
+  if (currentPost && blocked && viewOnce !== bypassKey) return <ContentBlockNotice
+    reason={blocked} onViewOnce={() => setViewOnce(bypassKey)} onBack={onBack}
+    onSettings={() => push({ kind: "settings" })} />;
 
   return (
     <div className="ios-page absolute inset-0 bg-bg flex flex-col">
       <div className="shrink-0 flex items-center gap-2 px-2 bg-s1" style={{ paddingTop: isMobile ? "var(--sat, 0px)" : 0, height: isMobile ? "calc(44px + var(--sat, 0px))" : 44 }}>
         <Button aria-label="返回" onClick={onBack} className="w-9 h-9 rounded-full flex items-center justify-center text-on hover:bg-s3 pressable"><IBack size={19} /></Button>
         <span className="text-[14px] font-semibold text-on">吃瓜详情</span>
+        <Button disabled={!currentPost} onClick={() => setTagMenu(true)} className="ml-auto px-3 text-[13px]">不感兴趣</Button>
       </div>
 
       <div role="progressbar" aria-label="阅读进度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={readProgress} className="h-1 shrink-0 bg-s3 overflow-hidden"><div className="h-full bg-primary" style={{ width: `${readProgress}%` }} /></div>
@@ -175,13 +203,13 @@ export function PostDetail({ id, onBack, active = true }: { id: number; onBack: 
       }}>
         {err ? (
           <Empty icon={<IFireF size={26} />} title="加载失败" sub={err} action="重试" onAction={() => setReload(n => n + 1)} />
-        ) : !post ? (
+        ) : !currentPost ? (
           <div className="flex justify-center py-12"><Loader className="w-8 h-8 spinner" /></div>
         ) : (
           <>
             <div data-post-media className="relative w-full bg-black mx-auto" style={{ height: isMobile ? "min(48vh, 420px)" : "min(60vh, 640px)" }}>
               {play && src ? (
-                <Player src={src} poster={cover(post.cover)} autoPlay active={active} controls muted={muted}
+                <Player src={src} poster={cover(currentPost.cover)} autoPlay active={active} controls muted={muted}
                   onToggleMute={() => setMuted((m) => !m)} diagnosticContext={{ video_id: id, active }} className="w-full h-full"
                   onEnded={() => {
                     /* 多段吃瓜视频：播完自动接下一段 */
@@ -189,7 +217,7 @@ export function PostDetail({ id, onBack, active = true }: { id: number; onBack: 
                   }} />
               ) : src ? (
                 <Button aria-label="播放视频" onClick={() => setPlay(true)} className="absolute inset-0">
-                  <Img src={post.cover} eager />
+                  <Img src={currentPost.cover} eager />
                     <span className="absolute inset-0 flex items-center justify-center">
                       <span className="w-14 h-14 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center elev-2">
                         <IPlayF size={24} className="text-white ml-0.5" />
@@ -197,7 +225,7 @@ export function PostDetail({ id, onBack, active = true }: { id: number; onBack: 
                     </span>
                 </Button>
               ) : (
-                <div className="absolute inset-0"><Img src={post.cover} eager /></div>
+                <div className="absolute inset-0"><Img src={currentPost.cover} eager /></div>
               )}
               {resolving && !src && <div className="absolute inset-0 flex items-center justify-center gap-3 pointer-events-none bg-black/40 text-white"><Loader label="正在解析视频" /><span>正在解析视频…</span></div>}
             </div>
@@ -216,25 +244,26 @@ export function PostDetail({ id, onBack, active = true }: { id: number; onBack: 
                 </div>
               )}
             <div className="px-4 pt-3.5 mx-auto max-w-[800px] select-text">
-              <h1 className="text-[17px] font-bold text-on leading-snug">{post.title}</h1>
+              <h1 className="text-[17px] font-bold text-on leading-snug">{currentPost.title}</h1>
               <div className="flex items-center gap-2 mt-2 text-[12px] text-mut">
-                <span>{post.publish_time || post.created_at}</span>
-                <span className="flex items-center gap-1"><IFireF size={10} />{fmt(post.hot)}</span>
+                <span>{currentPost.publish_time || currentPost.created_at}</span>
+                <span className="flex items-center gap-1"><IFireF size={10} />{fmt(currentPost.hot)}</span>
               </div>
               <div className="flex flex-wrap gap-1.5 mt-2.5">
-                {(post.tags || []).filter((t) => !t.includes(HIDDEN_POST_TAG)).slice(0, 8).map((t) => (
+                {(currentPost.tags || []).filter((t) => !t.includes(HIDDEN_POST_TAG)).slice(0, 8).map((t) => (
                   <span key={t} className="px-2 py-0.5 rounded-(--r-ctl) bg-s3 text-[12px] text-on/75">#{t}</span>
                 ))}
               </div>
-              {post.content && (
-                (isHtml(post.content) || (!strictSecurity && /<[a-z][\s\S]*>/i.test(post.content)))
+              {currentPost.content && (
+                (isHtml(currentPost.content) || (!strictSecurity && /<[a-z][\s\S]*>/i.test(currentPost.content)))
                   ? <div className="article-body mt-3.5" onClick={(e) => handleArticleClick(e, openSafeLink)} dangerouslySetInnerHTML={{ __html: safeHtml }} />
-                  : <Surface className="mt-3.5 rounded-(--r-md) bg-s2 p-3.5 text-[14px] leading-relaxed text-on/80 whitespace-pre-wrap">{post.content}</Surface>
+                  : <Surface className="mt-3.5 rounded-(--r-md) bg-s2 p-3.5 text-[14px] leading-relaxed text-on/80 whitespace-pre-wrap">{currentPost.content}</Surface>
               )}
             </div>
           </>
         )}
       </div>
+      <TagBlockMenu open={tagMenu} tags={currentPost?.tags || []} onClose={() => setTagMenu(false)} onSettings={() => push({ kind: "settings" })} />
     </div>
   );
 }
