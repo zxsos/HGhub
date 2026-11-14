@@ -33,6 +33,7 @@ function Harness() {
     {page === "topic" ? <TopicPage slug={key} name={key} wide={wide} onBack={() => {}} />
       : page === "tags" ? <TagsPage wide={wide} onBack={() => {}} />
       : page === "tag" ? <TagPage tag={key} name={key} wide={wide} onBack={() => {}} />
+      : page === "original" ? <ChannelPage cate="original" name="原创频道" wide={wide} onBack={() => {}} />
       : page === "channel" ? <ChannelPage cate="ai-duanju" name="测试频道" wide={wide} onBack={() => {}} />
       : page === "category" ? <Category active wide={wide} />
       : <TopicsPage wide={wide} onBack={() => {}} />}
