@@ -33,6 +33,13 @@ try {
         if (cmd === "app_boot") return Promise.resolve({ user: null, logged_in: false, base: "https://fixture.invalid", strict_security: true });
         if (cmd === "playback_log_status") return Promise.resolve({ enabled: false, path: null, error: null });
         if (cmd === "debug_log") return Promise.resolve();
+        if (cmd === "set_text_interaction") {
+          if (typeof args.enabled !== "boolean") {
+            fixture.unexpected.push(`${cmd}: enabled must be boolean`);
+            return Promise.reject("Invalid set_text_interaction.enabled");
+          }
+          return Promise.resolve(null);
+        }
         if (cmd === "line_auto") return Promise.resolve({ base: "https://fixture.invalid", previous: "https://fixture.invalid", switched: false, pick: { tier: "main", ms: 1, reason: "fixture", candidates: [] } });
         if (["api_feed", "api_category", "api_posts", "api_original_videos", "api_post_category", "api_search_hot"].includes(cmd)) return Promise.resolve(emptyPage);
         // App's development-only playback self-test must not fetch media upstream.

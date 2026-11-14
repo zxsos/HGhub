@@ -44,7 +44,11 @@ body {
   -webkit-user-select: none;
   -webkit-touch-callout: none;
 }
-input, textarea { user-select: text; -webkit-user-select: text; }
+input, textarea, [contenteditable="true"], .select-text, .article-body {
+  user-select: text;
+  -webkit-user-select: text;
+  -webkit-touch-callout: default;
+}
 img, video { -webkit-user-drag: none; }
 button { cursor: pointer; font-family: inherit; }
 

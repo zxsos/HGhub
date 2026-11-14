@@ -21,6 +21,9 @@ import ResizeHandles from "./components/ResizeHandles";
 import { tracePlayback } from "./playbackDiagnostics";
 import { IGrid, IGridF, IHome, IHomeF, ISearch, IUser, IUserF, Logo } from "./icons";
 
+const SELECTABLE_TEXT = 'input, textarea, [contenteditable="true"], .select-text, .article-body';
+const isSelectableText = (target: EventTarget | null) => target instanceof Element && !!target.closest(SELECTABLE_TEXT);
+
 function TabBar() {
   const { tab, setTab, platform } = useStore();
   const items = [
@@ -240,27 +243,30 @@ export default function App() {
     tracePlayback("navigation.change", { tab, stack: stack.map(p => ({ page: p.kind, key: p.key })), login_open: loginOpen });
   }, [tab, stack, loginOpen]);
 
-  /* iOS：长按快进会触发 WKWebView 系统文本选择放大镜（loupe），纯 CSS 挡不住。
-     原生层已默认关闭文本交互（isTextInteractionEnabled=false）；这里在用户触碰输入框时
-     重新打开、失焦时再关闭，避免影响搜索/评论/登录等文本输入。 */
+  /* iOS keeps player gestures free of selection handles while inputs and reading text
+     retain native selection/copy. Pointer targeting also handles non-focusable articles. */
   useEffect(() => {
     if (platform !== "ios") return;
-    const setTI = (enabled: boolean) => invoke("set_text_interaction", { enabled }).catch(() => {});
-    const INPUTS = 'input, textarea, [contenteditable="true"]';
-    const onDown = (e: Event) => {
-      const t = e.target as HTMLElement | null;
-      if (t && typeof t.closest === "function" && t.closest(INPUTS)) setTI(true);
+    let last: boolean | null = null;
+    const setTI = (enabled: boolean) => {
+      if (last === enabled) return;
+      last = enabled;
+      invoke("set_text_interaction", { enabled }).catch(() => { last = null; });
     };
+    const onDown = (e: Event) => setTI(isSelectableText(e.target));
     const onFocusOut = (e: FocusEvent) => {
-      const t = e.target as HTMLElement | null;
-      if (t && typeof t.closest === "function" && t.closest(INPUTS)) setTI(false);
+      // A touch on an article can blur an input with relatedTarget=null after pointerdown.
+      // Keep that pointer decision; the next control interaction explicitly disables selection.
+      if (e.relatedTarget) setTI(isSelectableText(e.relatedTarget));
     };
     document.addEventListener("touchstart", onDown, { capture: true, passive: true });
     document.addEventListener("pointerdown", onDown, { capture: true, passive: true });
+    document.addEventListener("focusin", onDown, true);
     document.addEventListener("focusout", onFocusOut, true);
     return () => {
       document.removeEventListener("touchstart", onDown, true);
       document.removeEventListener("pointerdown", onDown, true);
+      document.removeEventListener("focusin", onDown, true);
       document.removeEventListener("focusout", onFocusOut, true);
     };
   }, [platform]);
@@ -293,7 +299,7 @@ export default function App() {
   }, [platform]);
 
   useEffect(() => {
-    const prevent = (e: Event) => e.preventDefault();
+    const prevent = (e: Event) => { if (!isSelectableText(e.target)) e.preventDefault(); };
     document.addEventListener("contextmenu", prevent);
     return () => document.removeEventListener("contextmenu", prevent);
   }, []);
