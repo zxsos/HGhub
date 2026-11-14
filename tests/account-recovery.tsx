@@ -30,6 +30,7 @@ const fixture = {
   held: new Set(scenario === "profile-pending" ? ["api_video"] : []),
   loggedIn: scenario === "profile-logout" || scenario === "user-errors" || scenario === "user-follow" || scenario === "following-paging",
   setUser: (_u: User | null) => {},
+  openLogin: () => {},
   navigate: (_page: string, _id?: number) => {},
   state: {} as { user: User | null; follows: number[]; history: unknown[]; loginOpen: boolean },
   login() { fixture.setUser(demoUser); },
@@ -42,6 +43,7 @@ const fixture = {
   },
 };
 function result(cmd: string, args: Record<string, unknown>) {
+  if (cmd === "api_login" || cmd === "api_register") return { user: demoUser };
   if (cmd === "api_video") return card(Number(args.id));
   if (cmd === "api_user") return { id: Number(args.id), username: "author", nickname: `作者 ${args.id}`, sign: "这是较长的作者签名。".repeat(30) };
   if (cmd === "api_user_stats") return { followers: 120, video_count: 40, like_count: 20 };
@@ -63,6 +65,7 @@ function Harness() {
   const [page, setPage] = useState(scenario.startsWith("following") ? "following" : scenario.startsWith("user") ? "user" : "profile");
   const [id, setId] = useState(7);
   fixture.setUser = store.setUser;
+  fixture.openLogin = () => store.setLoginOpen(true);
   fixture.state = { user: store.user, follows: store.follows, history: store.history, loginOpen: store.loginOpen };
   fixture.navigate = (next, nextId) => { setPage(next); if (nextId) setId(nextId); };
   return <div className="plat-ios" style={{ position: "absolute", inset: 0 }}>
