@@ -5,6 +5,8 @@ import { api, fmt } from "../api";
 import type { Post, VideoCard } from "../types";
 import { useStore } from "../store";
 import { MediaCard, Masonry, RowCard } from "../components/cards";
+import { FilteredContent } from "../components/FilteredContent";
+import { useContentPreferences } from "../contentPreferences";
 import { CollectionLink, CollectionLinks } from "../components/CollectionLink";
 import { InplaceSearch } from "../components/InplaceSearch";
 import { Empty } from "../components/ui";
@@ -122,12 +124,12 @@ export default function Category({ wide, active }: { wide: boolean; active: bool
                   全部<IChevR size={14} />
                 </span>
               </Button>
-              <div className="scroll-x flex gap-2.5 px-4 snap-x" role="group" aria-label={`${c.name}影片预览`}>
-                {list.map((v) => (
+              <FilteredContent items={list} scopeKey={c.cate} className="mx-4">{visible => <div className="scroll-x flex gap-2.5 px-4 snap-x" role="group" aria-label={`${c.name}影片预览`}>
+                {visible.map((v) => (
                   <RowCard key={v.id} v={v} onOpen={() => push({ kind: "feed", videoIds: list.map((x) => x.id), index: list.findIndex((x) => x.id === v.id), title: c.name })} />
                 ))}
                 {!list.length && <PreviewStatus name={c.name} loading={loading[c.cate] !== false} error={errors[c.cate]} onRetry={() => void loadPreview(c.cate)} />}
-              </div>
+              </div>}</FilteredContent>
             </section>
           );
         })}
@@ -147,13 +149,13 @@ export default function Category({ wide, active }: { wide: boolean; active: bool
               全部<IChevR size={14} />
             </span>
           </Button>
-          <div className="scroll-x flex gap-2.5 px-4 snap-x" role="group" aria-label="吃瓜内容预览">
-            {posts.map((post) => (
+          <FilteredContent items={posts} scopeKey="posts" className="mx-4">{visible => <div className="scroll-x flex gap-2.5 px-4 snap-x" role="group" aria-label="吃瓜内容预览">
+            {visible.map((post) => (
               <div key={post.id} className="ios-row-card"><MediaCard title={post.title} cover={post.cover}
                 subtitle={`${fmt(post.hot)} 次浏览`} onOpen={() => push({ kind: "post", id: post.id })} /></div>
             ))}
             {!posts.length && <PreviewStatus name="吃瓜" loading={loading.posts !== false} error={errors.posts} onRetry={() => void loadPreview("posts")} />}
-          </div>
+          </div>}</FilteredContent>
         </section>
 
         <div className="px-4 text-center text-[12px] text-dim pt-1">— 已展示全部频道 —</div>
@@ -188,6 +190,8 @@ const originalSort = (cate: (typeof ORIGINAL_CATES)[number]["value"]) =>
 
 export function ChannelPage({ cate, name, onBack, wide }: { cate: string; name: string; onBack: () => void; wide: boolean }) {
   const { push } = useStore();
+  const { preferences } = useContentPreferences();
+  const filtering = !preferences.paused && (preferences.blockedTags.length > 0 || preferences.hideUntagged);
   const [searching, setSearching] = useState(false);
   const [serverSort, setServerSort] = useState<(typeof CHANNEL_SORTS)[number]["value"]>("latest");
   const [originalCate, setOriginalCate] = useState<(typeof ORIGINAL_CATES)[number]["value"]>("all");
@@ -265,12 +269,12 @@ export function ChannelPage({ cate, name, onBack, wide }: { cate: string; name: 
   const replacing = refreshing || filterPending;
   useEffect(() => {
     const el = sentinel.current;
-    if (!el || loading || err || replacing || page >= pages) return;
+    if (!el || filtering || loading || err || replacing || page >= pages) return;
     const io = new IntersectionObserver((es) => { if (es[0].isIntersecting) void loadMore(); }, { root: scrollContainer.current, rootMargin: "300px" });
     io.observe(el);
     return () => io.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, pages, loading, err, replacing]);
+  }, [page, pages, loading, err, replacing, filtering]);
 
   return (
     <div className="ios-page absolute inset-0 bg-bg flex flex-col">
@@ -306,7 +310,7 @@ export function ChannelPage({ cate, name, onBack, wide }: { cate: string; name: 
         {items.length > 0 && err && <div role="status" className="mb-3 flex flex-wrap items-center gap-2 text-[12px] text-mut"><span>{err}</span><Button className="px-3 text-primary" onClick={() => void loadMore(replacing)}>重试</Button></div>}
         {items.length ? (
           <div inert={replacing || undefined} className={replacing ? "opacity-60" : undefined}>
-            <Masonry videos={items} wide={wide} onOpen={(v) => { if (!replacing) push({ kind: "feed", videoIds: items.map((x) => x.id), index: items.findIndex((x) => x.id === v.id), title: name }); }} />
+            <Masonry videos={items} scopeKey={filterKey(serverSort, originalCate)} wide={wide} onOpen={(v) => { if (!replacing) push({ kind: "feed", videoIds: items.map((x) => x.id), index: items.findIndex((x) => x.id === v.id), title: name }); }} />
           </div>
         ) : err ? (
           <Empty icon={<IGrid size={26} />} title="加载失败" sub={err} action="重试" onAction={() => void loadMore(true)} />
@@ -315,7 +319,7 @@ export function ChannelPage({ cate, name, onBack, wide }: { cate: string; name: 
         ) : <Empty icon={<IGrid size={26} />} title="该筛选下暂无内容" sub="换个筛选试试" />}
         <div ref={sentinel} className="h-10" />
         {loading && items.length > 0 && <div className="flex justify-center py-3"><Loader className="w-6 h-6 spinner" /></div>}
-        {!loading && !err && !replacing && page < pages && items.length > 0 && <Button onClick={() => void loadMore()} className="my-3 px-4 text-primary">加载更多</Button>}
+        {!loading && !err && !replacing && page < pages && <Button onClick={() => void loadMore()} className="my-3 px-4 text-primary">加载更多</Button>}
         {!loading && !replacing && !err && page >= pages && items.length > 0 && (
           <div className="text-center text-[12px] text-dim py-3">— 已经到底啦 —</div>
         )}

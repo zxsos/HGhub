@@ -4,6 +4,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { api, fmt } from "../api";
 import type { VideoCard } from "../types";
 import { useStore } from "../store";
+import { useContentPreferences } from "../contentPreferences";
 import { Masonry } from "../components/cards";
 import { InplaceSearch } from "../components/InplaceSearch";
 import { Empty, Img } from "../components/ui";
@@ -158,7 +159,7 @@ export function TopicPage({ slug, name, onBack, wide }: { slug: string; name: st
         ) : err && !videos.length ? (
           <Empty icon={<TopicIcon size={26} />} title="加载失败" sub={err} action="重试" onAction={load} />
         ) : videos.length ? (
-          <Masonry videos={videos} wide={wide} onOpen={(v) => push({ kind: "feed", videoIds: videos.map((x) => x.id), index: videos.findIndex((x) => x.id === v.id), title: topic?.title || name })} />
+          <Masonry videos={videos} scopeKey={slug} wide={wide} onOpen={(v) => push({ kind: "feed", videoIds: videos.map((x) => x.id), index: videos.findIndex((x) => x.id === v.id), title: topic?.title || name })} />
         ) : (
           <Empty icon={<TopicIcon size={26} />} title="暂无内容" />
         )}
@@ -225,6 +226,9 @@ export function TagsPage({ onBack, wide }: { onBack: () => void; wide: boolean }
 /* ================= 标签视频页 ================= */
 export function TagPage({ tag, name, onBack, wide }: { tag: string; name: string; onBack: () => void; wide: boolean }) {
   const { push } = useStore();
+  const { preferences, isTagBlocked, blockTags, unblockTag } = useContentPreferences();
+  const filtering = !preferences.paused && (preferences.blockedTags.length > 0 || preferences.hideUntagged);
+  const tagBlocked = isTagBlocked(name);
   const [searching, setSearching] = useState(false);
   const [items, setItems] = useState<VideoCard[]>([]);
   const [page, setPage] = useState(0);
@@ -267,13 +271,13 @@ export function TagPage({ tag, name, onBack, wide }: { tag: string; name: string
   }, [load, tag]);
   useEffect(() => {
     const el = sentinel.current;
-    if (!el || err || loading || page >= pages) return;
+    if (!el || filtering || err || loading || page >= pages) return;
     const io = new IntersectionObserver(entries => {
       if (entries[0].isIntersecting) void load(page + 1);
     }, { root: scrollContainer.current, rootMargin: "300px" });
     io.observe(el);
     return () => io.disconnect();
-  }, [load, page, pages, err, loading]);
+  }, [load, page, pages, err, loading, filtering]);
 
   return (
     <div className="ios-page absolute inset-0 bg-bg flex flex-col">
@@ -288,17 +292,19 @@ export function TagPage({ tag, name, onBack, wide }: { tag: string; name: string
         </div>
       </div>
       <div ref={scrollContainer} className="flex-1 scroll-y px-4 pt-3 pb-8" aria-busy={loading || !current}>
+        <Button style={{ minBlockSize: 44 }} aria-pressed={tagBlocked} onClick={() => tagBlocked ? unblockTag(name) : blockTags([name])}
+          className="mb-3 min-h-11 rounded-(--r-ctl) bg-s2 px-4 text-[13px] text-primary">{tagBlocked ? "取消屏蔽此标签" : "屏蔽此标签"}</Button>
         {(loading || !current) && !visibleItems.length ? (
           <div className="flex justify-center py-12"><Loader className="w-8 h-8 spinner" /></div>
         ) : err && !visibleItems.length ? (
           <Empty icon={<TagIcon size={26} />} title="加载失败" sub={err} action="重试" onAction={() => void load(1, true)} />
         ) : visibleItems.length ? (
-          <Masonry videos={visibleItems} wide={wide} onOpen={(v) => push({ kind: "feed", videoIds: visibleItems.map(x => x.id), index: visibleItems.findIndex(x => x.id === v.id), title: name })} />
+          <Masonry videos={visibleItems} scopeKey={tag} wide={wide} onOpen={(v) => push({ kind: "feed", videoIds: visibleItems.map(x => x.id), index: visibleItems.findIndex(x => x.id === v.id), title: name })} />
         ) : <Empty icon={<TagIcon size={26} />} title="该标签下暂无内容" />}
         <div ref={sentinel} className="h-8" />
         {err && visibleItems.length > 0 && <div role="status" className="flex flex-wrap items-center justify-center gap-2 text-[12px] text-mut"><span>加载更多失败：{err}</span><Button onClick={() => void load(page + 1)} className="px-3 text-primary">重试</Button></div>}
         {loading && visibleItems.length > 0 && <div className="flex justify-center py-3"><Loader className="w-6 h-6 spinner" /></div>}
-        {!loading && !err && page < pages && visibleItems.length > 0 && <Button onClick={() => void load(page + 1)} className="my-3 px-4 text-primary">加载更多</Button>}
+        {!loading && !err && page < pages && <Button onClick={() => void load(page + 1)} className="my-3 px-4 text-primary">加载更多</Button>}
         {!loading && visibleItems.length > 0 && page >= pages && <div className="text-center text-[12px] text-dim py-3">— 已经到底啦 —</div>}
       </div>
       {searching && <InplaceSearch kind="video" wide={wide} onClose={() => setSearching(false)} onOpenVideo={(v, list) => push({ kind: "feed", videoIds: list.map(x => x.id), index: list.findIndex(x => x.id === v.id), title: name })} />}

@@ -5,6 +5,7 @@ import { useStore } from "../store";
 import { Modal, Toggle } from "../components/ui";
 import LinePicker from "../components/LinePicker";
 import ProxySettings from "../components/ProxySettings";
+import ContentPreferencesSettings from "../components/ContentPreferencesSettings";
 import { autoLineEnabled, setAutoLine } from "../autoLine";
 import { copyPlaybackLog, initPlaybackLog, setPlaybackLog, tracePlayback, usePlaybackLog } from "../playbackDiagnostics";
 import { formatNetDiag, shortVerdict } from "../netDiagReport";
@@ -97,7 +98,7 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
       </div>
 
       <nav aria-label="设置分组" className="shrink-0 scroll-x flex gap-2 pb-3">
-        {["外观", "播放", "本地数据", "网络", "播放诊断", "其他"].map(title => <Button key={title} className="ios-filter-pill shrink-0" onClick={() => {
+        {["外观", "播放", "内容偏好", "本地数据", "网络", "播放诊断", "其他"].map(title => <Button key={title} className="ios-filter-pill shrink-0" onClick={() => {
           const section = document.getElementById(`settings-${title}`);
           section?.scrollIntoView({ block: "start", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
           section?.focus({ preventScroll: true });
@@ -141,6 +142,8 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
               <Toggle on={preferHevc} onChange={setPreferHevc} label="优先高清" />
             </div>
           </Section>
+
+          <Section title="内容偏好"><ContentPreferencesSettings /></Section>
 
           <Section title="本地数据">
             <div className="flex items-center gap-3 px-3.5 py-3">

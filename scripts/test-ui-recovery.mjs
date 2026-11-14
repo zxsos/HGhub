@@ -16,6 +16,11 @@ const suites = [
   ['home-mobile', ['scripts/test-home-scheduling.mjs'], { HOME_UI_MOBILE: '1' }],
   ['reading', ['scripts/test-reading-selection.mjs']],
   ['player-panels', ['scripts/test-player-panels.mjs']],
+  ['content-preferences', ['scripts/test-content-preferences-core.mjs']],
+  ['filtered-lists', ['scripts/test-content-filter-lists.mjs']],
+  ['tag-feed', ['scripts/test-tag-feed.mjs']],
+  ['tag-posts', ['scripts/test-post-tag-blocking.mjs']],
+  ['preferences-journey', ['scripts/test-content-preferences-journey.mjs']],
 ];
 const output = new URL(`../test-results/ui-recovery/${Date.now()}/`, import.meta.url);
 mkdirSync(output, { recursive: true });

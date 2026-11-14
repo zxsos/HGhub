@@ -1,6 +1,6 @@
 import { Button, Image, SegmentedControl, Surface } from "./ios/controls";
 import { Loader } from "./ios/effects";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { api, cover, fmt, fmtTime, isMobile, logLine, mediaUrl } from "../api";
 import type { Detail, Episode, Post, VideoCard } from "../types";
@@ -15,6 +15,10 @@ import { setBackHandler } from "../back";
 import { copyText } from "../clipboard";
 import { tracePlayback } from "../playbackDiagnostics";
 import { createPlaybackClock } from "../playbackClock";
+import { useContentPreferences } from "../contentPreferences";
+import { ContentBlockNotice } from "./ContentBlockNotice";
+import { TagBlockMenu } from "./TagBlockMenu";
+import { FilteredContent } from "./FilteredContent";
 import {
   IBack, IBoltF, IChevR, IChevronDown, IChevronUp, IClose, ICommentF, ICompress, IExpand, IFileText, IHeart, IHeartF,
   ILink, IList, ILockF, IPauseF, IPlayF, ISearch, IStar, IStarF, IVertSwap, IVol, IVolMute,
@@ -30,6 +34,7 @@ type Props = {
   bottomInset: number;
   onBack?: () => void;
   onNearEnd?: () => void;
+  onBlocked?: (id: number) => void;
   /** 从观看记录续播：起始集数与秒数 */
   startEp?: number;
   startTime?: number;
@@ -39,14 +44,25 @@ const RATES = [1, 1.25, 1.5, 2];
 
 const stripHtml = (s: string) => s.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
 
-export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind = "video", active, bottomInset, onBack, onNearEnd, startEp, startTime }: Props) {
+export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind = "video", active, bottomInset, onBack, onNearEnd, onBlocked, startEp, startTime }: Props) {
   const store = useStore();
   const { isLiked, isFav, toggleLikeLocal, toggleFavLocal, toggleFollowLocal, muted, setMuted, volume, setVolume, toast, addHistory, user, setLoginOpen, swipeEp, setSwipeEp, preferHevc, setPreferHevc } = store;
   const isDesktop = !isMobile;
+  const contentPreferences = useContentPreferences();
+  const { preferences, revision, blockReason } = contentPreferences;
+  const filtering = !preferences.paused && (preferences.blockedTags.length > 0 || preferences.hideUntagged);
+  const [tagMenu, setTagMenu] = useState(false);
+  const [viewOnce, setViewOnce] = useState("");
+  const [checked, setChecked] = useState<Record<string, boolean>>({});
+  const [tagErrors, setTagErrors] = useState<Record<string, string>>({});
 
   const boxRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<VideoHandle>(null);
-  const [index, setIndex] = useState(startIndex);
+  const [position, setPosition] = useState(() => ({ id: videoIds[startIndex], index: startIndex }));
+  const anchoredIndex = videoIds.indexOf(position.id);
+  const index = anchoredIndex >= 0 ? anchoredIndex : Math.max(0, Math.min(position.index, videoIds.length - 1));
+  const idsRef = useRef(videoIds); idsRef.current = videoIds;
+  const setIndex = useCallback((next: number) => setPosition({ id: idsRef.current[next], index: next }), []);
   const [renderIndex, setRenderIndex] = useState(startIndex);
   const [epMap, setEpMap] = useState<Record<number, number>>(() => (startEp ? { [videoIds[startIndex]]: startEp } : {}));
   const [details, setDetails] = useState<Record<number, Detail>>({});
@@ -74,7 +90,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     startTime && startTime > 1 ? { key: `${videoIds[startIndex]}:${startEp || 1}`, t: startTime } : null,
   );
   /* 观看进度：onTime 里节流写回 store，卸载时再兜一次 */
-  const liveRef = useRef({ id: 0, ep: 1, dur: 0, t: 0 });
+  const liveRef = useRef({ id: 0, ep: 1, dur: 0, t: 0, permissionKey: "" });
   const lastSaveRef = useRef(0);
   const theater = store.theater;
   const setTheater = store.setTheater;
@@ -137,8 +153,23 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
 
   const curId = videoIds[index];
   const detail = details[curId];
+  const tagKey = `${store.lineEpoch}:${kind}:${curId}`;
+  const permissionKey = `${tagKey}:${revision}`;
+  const currentTags = kind === "post" ? posts[curId]?.tags : detail?.tags;
+  const tagsReady = !!checked[tagKey];
+  const blocked = filtering && tagsReady ? blockReason(currentTags) : null;
+  const allowed = !filtering || (tagsReady && (!blocked || (mode !== "home" && viewOnce === permissionKey)));
+  const openPreferences = () => store.push({ kind: "settings" });
+  const backFromBlock = () => onBack ? onBack() : store.setTab("category");
+  useEffect(() => { setViewOnce(""); setTagMenu(false); }, [curId, revision, store.lineEpoch]);
+  useEffect(() => { if (blocked && mode === "home" && active) onBlocked?.(curId); }, [blocked, mode, active, curId, onBlocked]);
+  useEffect(() => { if (!allowed) { setPanel(null); setTagMenu(false); } }, [allowed]);
   const curEp = epMap[curId] || 1;
   const playKey = `${curId}:${curEp}`;
+  const playGuard = useRef({ allowed, id: curId, permissionKey, playKey });
+  playGuard.current = { allowed, id: curId, permissionKey, playKey };
+  const isCurrentPlayback = () => playGuard.current.allowed && playGuard.current.id === curId
+    && playGuard.current.permissionKey === permissionKey && playGuard.current.playKey === playKey;
   const mainUrl = playUrls[playKey] || "";
   const hevcUrl = hevcUrls[playKey] || "";
   const playUrl = preferHevc && hevcUrl ? hevcUrl : mainUrl;
@@ -160,7 +191,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
 
   /* 观看进度：onTime 里每 5 秒落一次；退出播放页时再用 liveRef 兜一次 */
   const onTimeTick = (t: number) => {
-    liveRef.current = { id: curId, ep: curEp, dur: duration, t };
+    if (!isCurrentPlayback()) return;
+    liveRef.current = { id: curId, ep: curEp, dur: duration, t, permissionKey };
     if (isDesktop) playbackClock.publish(t);
     else setTime(t);
     const now = Date.now();
@@ -172,8 +204,9 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
 
   /* 拿到时长后再续播：只对进入时那一条生效，且不跳到片尾 */
   const onDurationTick = (d: number) => {
+    if (!isCurrentPlayback()) return;
     setDuration(d);
-    liveRef.current = { ...liveRef.current, dur: d };
+    liveRef.current = { id: curId, ep: curEp, dur: d, t: liveRef.current.id === curId && liveRef.current.ep === curEp ? liveRef.current.t : 0, permissionKey };
     const r = resumeRef.current;
     if (r && r.key === playKey && r.t > 1 && (!d || r.t < d - 3)) {
       resumeRef.current = null;
@@ -246,7 +279,24 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
    * 有上一/下一集就切集；没有就切上一/下一部剧。
    * 关闭时保持原生滚动，停稳 150ms 后按所在屏切剧。
    */
-  const idxRef = useRef(startIndex);
+  const idxRef = useRef(index);
+  idxRef.current = index;
+  const anchoredScroll = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    const id = videoIds[index];
+    if (position.id !== id || position.index !== index) {
+      setPosition({ id, index }); setRenderIndex(index);
+    }
+    // The scroll container is recreated after the tag gate/one-time prompt.
+    // Anchor by content ID before paint, including a nonzero starting position.
+    if (boxRef.current) {
+      const top = index * (boxRef.current.clientHeight || 1);
+      if (Math.abs(boxRef.current.scrollTop - top) > 1) {
+        anchoredScroll.current = top;
+        boxRef.current.scrollTop = top;
+      }
+    }
+  }, [videoIds, index, position.id, position.index, allowed]);
   const swipeTimer = useRef(0);
 
   const resolveSwipe = useCallback((target: number) => {
@@ -261,6 +311,11 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     if (fs || pinchRef.current) return;
     const el = boxRef.current;
     if (!el) return;
+    if (anchoredScroll.current !== null) {
+      const top = anchoredScroll.current;
+      anchoredScroll.current = null;
+      if (Math.abs(el.scrollTop - top) <= 1) return;
+    }
     const h = el.clientHeight || 1;
     const i = Math.max(0, Math.min(videoIds.length - 1, Math.round(el.scrollTop / h)));
     if (isDesktop) setRenderIndex(i);
@@ -302,59 +357,48 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     return next >= 0 && next < videoIds.length;
   };
 
-  /* 初始定位 */
-  useEffect(() => {
-    const el = boxRef.current;
-    if (!el) return;
-    const raf = requestAnimationFrame(() => {
-      el.scrollTop = startIndex * (el.clientHeight || 1);
-    });
-    return () => cancelAnimationFrame(raf);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  /* 拉详情（当前 + 邻接预取） */
+  /* With filtering enabled, details are the gate: no media is requested before tags settle. */
   useEffect(() => {
     let alive = true;
+    const epoch = store.lineEpoch;
     const need = [videoIds[index], videoIds[index + 1], videoIds[index - 1]].filter(Boolean);
-    need.forEach((id) => {
-      if (details[id]) return;
-      api.video(id).then((d) => { if (alive) setDetails((m) => ({ ...m, [id]: d })); }).catch(() => {});
+    need.forEach(id => {
+      const key = `${epoch}:${kind}:${id}`;
+      if (checked[key]) return;
+      setTagErrors(previous => ({ ...previous, [key]: "" }));
+      const request = kind === "post" ? api.post(id) : api.video(id);
+      request.then(value => {
+        if (!alive) return;
+        if (!value) throw new Error("标签详情为空，请重试");
+        if (kind === "post") setPosts(previous => ({ ...previous, [id]: value as Post }));
+        else setDetails(previous => ({ ...previous, [id]: value as Detail }));
+        setChecked(previous => ({ ...previous, [key]: true }));
+      }).catch(error => {
+        if (alive) setTagErrors(previous => ({ ...previous, [key]: error instanceof Error ? error.message : "标签暂不可用，请重试" }));
+      });
     });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [index, videoIds, proxyRetry]);
-
-  /* 吃瓜帖子：直接拿帖子详情（含 video_url） */
-  useEffect(() => {
-    if (kind !== "post") return;
-    let alive = true;
-    [videoIds[index], videoIds[index + 1], videoIds[index - 1]].filter(Boolean).forEach((id) => {
-      if (posts[id]) return;
-      api.post(id).then((p) => { if (alive) setPosts((m) => ({ ...m, [id]: p })); }).catch(() => {});
-    });
-    return () => { alive = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kind, index, videoIds, proxyRetry]);
+  }, [kind, index, videoIds, proxyRetry, store.lineEpoch]);
 
   /* 相关推荐：切到当前视频时拉一次 */
   useEffect(() => {
-    if (!curId || kind !== "video") return;
+    if (!curId || kind !== "video" || !allowed) return;
     let alive = true;
     setRelated([]);
     api.related(curId).then((r) => { if (alive) setRelated(r?.items || []); }).catch(() => {});
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [curId, kind]);
+  }, [curId, kind, allowed]);
 
   /* 拉播放地址 */
   useEffect(() => {
-    if (!curId) return;
+    if (!curId || !allowed) return;
     if (playUrls[playKey]) return;
     let alive = true;
     api.play(curId, curEp)
       .then((info) => {
-        if (!alive) return;
+        if (!alive || !isCurrentPlayback()) return;
         const streamUrl = info?.streams?.main || info?.video_url;
         const hevcStream = info?.streams?.hevc || info?.video_url_hevc || "";
         // 接口本身成功但业务失败（status=0 / streams 为空）时不会进 call() 的 catch，
@@ -382,11 +426,12 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
       .catch((e) => { if (alive) setErr((e as Error).message || "取播放地址失败"); });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [curId, curEp, proxyRetry]);
+  }, [curId, curEp, proxyRetry, allowed, permissionKey]);
 
   /* 剧集预热：相邻集提前取好播放地址，切集秒开 */
   useEffect(() => {
-    if (!curId || kind !== "video") return;
+    if (!curId || kind !== "video" || !allowed) return;
+    let alive = true;
     const ep = epMap[curId] || 1;
     const total = episodes.length;
     const want: number[] = [];
@@ -397,6 +442,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
       if (playUrls[k]) continue;
       api.play(curId, e)
         .then((info) => {
+          if (!alive || !playGuard.current.allowed || playGuard.current.permissionKey !== permissionKey) return;
           const u = info?.streams?.main || info?.video_url;
           const h = info?.streams?.hevc || info?.video_url_hevc || "";
           if (u) setPlayUrls((m) => ({ ...m, [k]: u }));
@@ -404,8 +450,9 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
         })
         .catch(() => { /* 预热失败不影响当前播放 */ });
     }
+    return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [curId, curEp, episodes.length]);
+  }, [curId, curEp, episodes.length, allowed, permissionKey]);
 
   /* 切换条目/集数时重置播放状态 */
   useEffect(() => {
@@ -424,13 +471,14 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
   /* 离开播放页时把最后位置落盘 */
   useEffect(() => () => {
     const s = liveRef.current;
-    if (s.id && s.dur) addHistory(s.id, s.ep, s.t, s.dur);
+    if (s.id && s.dur && playGuard.current.allowed && playGuard.current.id === s.id
+      && playGuard.current.playKey === `${s.id}:${s.ep}` && playGuard.current.permissionKey === s.permissionKey) addHistory(s.id, s.ep, s.t, s.dur);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /* 键盘 */
   useEffect(() => {
-    if (!active || controlsLocked) return;
+    if (!active || !allowed || controlsLocked) return;
     const seekRelative = (delta: number) => {
       const current = videoRef.current?.el()?.currentTime ?? 0;
       videoRef.current?.seek(Math.max(0, current + delta), "keyboard_shortcut");
@@ -458,7 +506,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     window.addEventListener("keydown", fn);
     return () => window.removeEventListener("keydown", fn);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, controlsLocked, panel, index, stepDir]);
+  }, [active, allowed, controlsLocked, panel, index, stepDir]);
 
   /* 安卓返回键：面板打开时先关面板 */
   useEffect(() => {
@@ -870,6 +918,16 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
     return base + (isLiked(curId) ? 1 : 0);
   }, [meta.like, curId, isLiked]);
 
+  if (curId && !allowed) {
+    const error = tagErrors[tagKey];
+    const pending = !tagsReady && !error;
+    return <div className="absolute inset-0" inert={!active || undefined} aria-hidden={!active || undefined}><ContentBlockNotice reason={pending ? "确认标签后才开始播放。" : error || blocked || "正在跳过屏蔽内容"}
+      busy={pending || (mode === "home" && !!blocked && !!onBlocked)}
+      onViewOnce={blocked && mode !== "home" ? () => setViewOnce(permissionKey) : undefined}
+      onRetry={error ? () => setProxyRetry(value => value + 1) : undefined}
+      onBack={backFromBlock} onSettings={openPreferences} /></div>;
+  }
+
   if (!videoIds.length) {
     return <div className="absolute inset-0 bg-black flex items-center justify-center"><Loader className="w-9 h-9 spinner" /></div>;
   }
@@ -901,6 +959,9 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
           if (isDesktop && Math.abs(i - index) > 1 && Math.abs(i - renderIndex) > 1) {
             return <section key={vid} className={sectionClass} aria-hidden="true" />;
           }
+          if (filtering && !isActive && (!checked[`${store.lineEpoch}:${kind}:${vid}`] || blockReason(kind === "post" ? posts[vid]?.tags : details[vid]?.tags))) {
+            return <section key={vid} className={sectionClass} aria-hidden="true" />;
+          }
           return (
             <section key={vid} className={sectionClass}>
               {isActive && playUrl ? (
@@ -914,12 +975,13 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                   onClick={() => { if (isDesktop) videoRef.current?.toggle(); }}
                   onTime={onTimeTick}
                   onDuration={onDurationTick}
-                  onSize={(w, h) => setVsize((prev) => (prev.w === w && prev.h === h ? prev : { w, h }))}
-                  onPlaying={() => { setPaused(false); setWaiting(false); setErr(""); }}
-                  onPause={() => setPaused(true)}
-                  onWaiting={() => setWaiting(true)}
-                  onEnded={() => { const next = episodes.find((e) => e.ep_num === curEp + 1); if (next) pickEp(next.ep_num); }}
+                  onSize={(w, h) => { if (isCurrentPlayback()) setVsize((prev) => (prev.w === w && prev.h === h ? prev : { w, h })); }}
+                  onPlaying={() => { if (isCurrentPlayback()) { setPaused(false); setWaiting(false); setErr(""); } }}
+                  onPause={() => { if (isCurrentPlayback()) setPaused(true); }}
+                  onWaiting={() => { if (isCurrentPlayback()) setWaiting(true); }}
+                  onEnded={() => { if (!isCurrentPlayback()) return; const next = episodes.find((e) => e.ep_num === curEp + 1); if (next) pickEp(next.ep_num); }}
                   onError={(m) => {
+                    if (!isCurrentPlayback()) return;
                     setErr(m);
                     if (preferHevc && hevcUrl) {
                       setPreferHevc(false);
@@ -930,7 +992,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                 </div>
               ) : (
                 <div className="absolute inset-0">
-                  <Img src={detail?.cover || cards[vid]?.cover || posts[vid]?.cover || ""} eager={Math.abs(i - index) <= 1} />
+                  <Img src={details[vid]?.cover || cards[vid]?.cover || posts[vid]?.cover || ""} eager={Math.abs(i - index) <= 1} />
                   <div className="absolute inset-0" style={{ background: "rgba(0,0,0,.25)" }} />
                 </div>
               )}
@@ -1138,6 +1200,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                   </p>
                   <span className="text-[12px] hg-link font-semibold">{descOpen ? "收起" : "展开简介"}</span>
                 </Button>
+                {isActive && <Button aria-label="不感兴趣" onClick={() => setTagMenu(true)}
+                  style={{ minHeight: 44 }} className="mt-2 px-4 rounded-full hg-chip text-[12px]">不感兴趣</Button>}
               </div>
               )}
 
@@ -1150,10 +1214,14 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                     <p className="flex-1 min-w-0 text-[15px] font-semibold leading-snug hg-ink-2 hg-ov-shadow-strong clamp-2">{meta.title}</p>
                   </div>
                   <div className="relative pt-1.5 pb-2.5">
+                    <div className="flex flex-wrap items-center gap-2 px-4">
                     <Button onClick={() => setPanel("detail")}
-                      className="px-4 flex items-center gap-0.5 text-[12px] font-medium hg-ink-3 hg-ov-shadow-strong pressable">
+                      className="min-h-11 flex items-center gap-0.5 text-[12px] font-medium hg-ink-3 hg-ov-shadow-strong pressable">
                       详情 · 第 {curEp} 集<IChevR size={11} />
                     </Button>
+                    {isActive && <Button aria-label="不感兴趣" onClick={() => setTagMenu(true)}
+                      style={{ minHeight: 44 }} className="px-4 rounded-full hg-chip text-[12px]">不感兴趣</Button>}
+                    </div>
                     <div ref={barRef} className="mx-4 mt-2 relative" style={{ height: 14, touchAction: "none" }}
                       onPointerDown={onBarDown} onPointerMove={onBarMove} onPointerUp={onBarUp} onPointerCancel={onBarUp}>
                       {/* 轨道：几乎看不见，只暗示可拖动 */}
@@ -1204,8 +1272,8 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                 <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none"><Loader className="w-9 h-9 spinner" /></div>
               )}
               {isActive && err && (
-                <div className="absolute inset-0 z-20 flex items-center justify-center">
-                  <div className="rounded-xl p-5 flex flex-col items-center gap-3 text-[14px] hg-ink-2" style={{ background: "rgba(0,0,0,.7)" }}>
+                <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
+                  <div className="rounded-xl p-5 flex flex-col items-center gap-3 text-[14px] hg-ink-2 pointer-events-auto" style={{ background: "rgba(0,0,0,.7)" }}>
                     <span>视频暂时无法加载</span>
                     <span className="text-[12px] hg-ink-4 max-w-[240px] text-center break-all">{err}</span>
                     <Button className="hg-link text-[14px]" onClick={() => { setErr(""); setWaiting(true); videoRef.current?.play(); }}>重试</Button>
@@ -1423,11 +1491,11 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
                     {related.length > 0 && (
                       <div className="mt-4">
                         <div className="text-[12px] font-semibold text-dim mb-2">相关推荐</div>
-                        <div className="scroll-x flex gap-2.5 snap-x">
-                          {related.slice(0, 12).map((v) => (
+                        <FilteredContent items={related.slice(0, 12)} scopeKey={curId}>{visible => <div className="scroll-x flex gap-2.5 snap-x">
+                          {visible.map((v) => (
                             <RowCard key={v.id} v={v} onOpen={() => store.push({ kind: "feed", videoIds: related.map((x) => x.id), index: related.findIndex((x) => x.id === v.id), title: "相关推荐" })} />
                           ))}
-                        </div>
+                        </div>}</FilteredContent>
                       </div>
                     )}
 
@@ -1460,6 +1528,7 @@ export default function Feed({ videoIds, startIndex = 0, title = "", mode, kind 
             className="hg-chip w-9 h-9 rounded-full flex items-center justify-center pressable elev-1"><ISearch size={18} /></Button>}
         </div>
       )}
+      <TagBlockMenu open={tagMenu} tags={meta.tags} onClose={() => setTagMenu(false)} onSettings={openPreferences} />
       {controlsLocked && <PlaybackLock active={active} onUnlock={() => { setControlsLocked(false); wake(); }} />}
     </div>
   );
