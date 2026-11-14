@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { fmt } from "../api";
 import type { Post, VideoCard } from "../types";
 import { MediaCard, Masonry } from "./cards";
+import { FilteredContent } from "./FilteredContent";
 import { Empty } from "./ui";
 import { IBack, IClose, ISearch } from "../icons";
 import { useSearchResults } from "../useSearchResults";
@@ -63,12 +64,12 @@ export function InplaceSearch({ kind, postLabel = "吃瓜帖", scope, onOpenVide
           <section aria-label="栏目搜索结果" aria-busy={loading}>
             {result && count > 0 ? <>
               {kind === "post" ? (
-                <div className={`ios-media-grid ${wide ? "is-wide" : ""}`}>
-                  {posts.map((post) => (
+                <FilteredContent items={posts} scopeKey={JSON.stringify([submitted, kind, scope, result.keyword, result.kind])}>{visible => <div className={`ios-media-grid ${wide ? "is-wide" : ""}`}>
+                  {visible.map((post) => (
                     <MediaCard key={post.id} title={post.title} cover={post.cover} subtitle={`${fmt(post.hot)} 次浏览`} onOpen={() => onOpenPost?.(post)} />
                   ))}
-                </div>
-              ) : <Masonry videos={items} wide={wide} onOpen={(v) => onOpenVideo?.(v, items)} />}
+                </div>}</FilteredContent>
+              ) : <Masonry videos={items} scopeKey={JSON.stringify([submitted, kind, scope, result.keyword, result.kind])} wide={wide} onOpen={(v) => onOpenVideo?.(v, items)} />}
             </> : loading ? <div className="flex justify-center py-12"><Loader label="正在搜索" className="w-8 h-8 spinner" /></div>
               : !error && <Empty icon={<ISearch size={26} />}
                 title={result && result.page < result.pages ? "已加载页面没有匹配内容" : "没有找到相关内容"}

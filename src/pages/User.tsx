@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, fmt } from "../api";
 import type { Paged, UserProfile, VideoCard } from "../types";
 import { useStore } from "../store";
+import { useContentPreferences } from "../contentPreferences";
 import { Masonry } from "../components/cards";
 import { InplaceSearch } from "../components/InplaceSearch";
 import { Avatar, Empty } from "../components/ui";
@@ -11,6 +12,8 @@ import { IBack, IChevronDown, IGrid, ISearch, IUser } from "../icons";
 
 /** Keep pagination local to the scrolling page and reject responses from an old account/author. */
 function useUserVideos(enabled: boolean, request: (page: number) => Promise<Paged<VideoCard>>) {
+  const { preferences } = useContentPreferences();
+  const filtering = !preferences.paused && (preferences.blockedTags.length > 0 || preferences.hideUntagged);
   const [items, setItems] = useState<VideoCard[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
@@ -60,13 +63,13 @@ function useUserVideos(enabled: boolean, request: (page: number) => Promise<Page
     return () => { generation.current++; };
   }, [enabled, loadMore]);
   useEffect(() => {
-    if (!enabled || loading || err || !hasMore || !sentinel.current || !scroller.current) return;
+    if (!enabled || filtering || loading || err || !hasMore || !sentinel.current || !scroller.current) return;
     const observer = new IntersectionObserver(entries => {
       if (entries[0].isIntersecting) void loadMore();
     }, { root: scroller.current, rootMargin: "200px" });
     observer.observe(sentinel.current);
     return () => observer.disconnect();
-  }, [enabled, loading, err, hasMore, loadMore]);
+  }, [enabled, loading, err, hasMore, loadMore, filtering]);
   return { items, loading, err, total, hasMore, loadMore, scroller, sentinel };
 }
 
@@ -105,7 +108,7 @@ export function FollowingPage({ onBack, wide }: { onBack: () => void; wide: bool
       {!user ? <Empty icon={<IUser size={26} />} title="登录后查看关注流" sub="关注喜欢的作者，第一时间看到他们的新作品" action="去登录" onAction={() => setLoginOpen(true)} />
         : state.loading && !state.items.length ? <div className="flex justify-center py-12"><Loader /></div>
         : state.err && !state.items.length ? <Empty icon={<IGrid size={26} />} title="关注流加载失败" sub={state.err} action="重试" onAction={() => void state.loadMore()} />
-        : state.items.length ? <Masonry videos={state.items} wide={wide} onOpen={video => push({ kind: "feed", videoIds: state.items.map(item => item.id), index: state.items.findIndex(item => item.id === video.id), title: "关注" })} />
+        : state.items.length ? <Masonry videos={state.items} scopeKey={`following:${user.id}`} wide={wide} onOpen={video => push({ kind: "feed", videoIds: state.items.map(item => item.id), index: state.items.findIndex(item => item.id === video.id), title: "关注" })} />
         : <Empty icon={<IGrid size={26} />} title="还没有关注内容" sub="在分类中发现作品，关注喜欢的作者。" action="去分类看看" onAction={() => setTab("category")} />}
       {user && <PaginationFeedback state={state} />}
     </div>
@@ -213,7 +216,7 @@ export function UserPage({ id, name, onBack, wide }: { id: number; name?: string
       <div className="mt-4 mb-2.5 flex flex-wrap items-baseline justify-between gap-2"><h2 className="text-[14px] font-bold text-on">作品</h2><p role="status" className="text-[12px] text-mut">{countLabel(state)}</p></div>
       {state.loading && !state.items.length ? <div className="flex justify-center py-12"><Loader /></div>
         : state.err && !state.items.length ? <Empty icon={<IGrid size={26} />} title="作品加载失败" sub={state.err} action="重试" onAction={() => void state.loadMore()} />
-        : state.items.length ? <Masonry videos={state.items} wide={wide} onOpen={v => push({ kind: "feed", videoIds: state.items.map(x => x.id), index: state.items.findIndex(x => x.id === v.id), title: profile?.nickname || name || "用户作品" })} />
+        : state.items.length ? <Masonry videos={state.items} scopeKey={id} wide={wide} onOpen={v => push({ kind: "feed", videoIds: state.items.map(x => x.id), index: state.items.findIndex(x => x.id === v.id), title: profile?.nickname || name || "用户作品" })} />
         : <Empty icon={<IGrid size={26} />} title="暂无作品" />}
       <PaginationFeedback state={state} />
     </div>
